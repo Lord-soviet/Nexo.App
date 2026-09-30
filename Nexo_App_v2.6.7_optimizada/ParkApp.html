@@ -1318,7 +1318,8 @@ a[href="index.html"] > div{background:var(--fp-nav-blue)!important;color:#fff!im
                     <div class="col-md-7">    
                         <center><label>PLACA</label></center>
                         <div id="placaSuggestWrap" style="position:relative;">
-                            <input type="placa" maxlength="6" id="placa" name="placa" autocomplete="off" onkeyup="myFunction()" required="">
+                            <input type="placa" maxlength="10" id="placa" name="placa" autocomplete="off" onkeyup="myFunction()" required="">
+                            <small id="placaTipoHint" style="display:none;margin-top:4px;font-weight:700;color:#e67e00"></small>
                             <div id="placaSuggestions" role="listbox" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:0 0 5px 5px;box-shadow:0 4px 12px rgba(0,0,0,.18);max-height:230px;overflow-y:auto;text-align:left;"></div>
                         </div>
                     </div>
@@ -1360,9 +1361,9 @@ a[href="index.html"] > div{background:var(--fp-nav-blue)!important;color:#fff!im
                                 <label style="background:white;padding:5%;font-size:30px;width: 100%;" id="resta">
                                     0Mes 0Dia 0Hora 0min</label>
                             </div>
-                            <label class="col-md-2">Servicio</label>
-                            <div class="col-md-10">
-                                <select id="idTarifa" name="idTarifa" class="form-control" onchange="calcularTarifaServidor()" required="">
+                            <label class="col-md-2" id="svcLabel">Servicio</label>
+                            <div class="col-md-10" id="svcSelectWrap">
+                                <select id="idTarifa" name="idTarifa" class="form-control" onchange="calcularTarifaServidor()">
                                     <option value="">Seleccione Servicio</option>
                                                                         <option value="5">parqueadero Carro</option>
                                                                         <option value="6">parqueadero Moto</option>
@@ -1753,6 +1754,20 @@ a[href="index.html"] > div{background:var(--fp-nav-blue)!important;color:#fff!im
 </script>
 
 <script>
+/* Límite de la placa en Entradas: máximo 6 caracteres (ABC123, ABC12D).
+   Excepción: los códigos propios cicla/ptelec/mtelec llevan consecutivo y pueden pasar de 6. */
+(function(){
+  var SPECIAL=/^(CICLA|CICAL|PTELEC|MTELE)/i;
+  function limitPlaca(e){
+    var inp=e.target||document.getElementById('placa'); if(!inp||inp.id!=='placa') return;
+    var max=SPECIAL.test(inp.value)?10:6;
+    if(inp.value.length>max) inp.value=inp.value.slice(0,max);
+    inp.maxLength=10;
+  }
+  document.addEventListener('input',limitPlaca,true);
+  document.addEventListener('paste',function(e){ setTimeout(function(){limitPlaca({target:document.getElementById('placa')});},0); },true);
+})();
+
 function myFunction() {
     var input, filter, table, tr, td, i, txtValue;
     input = document.getElementById("placa");
@@ -2103,12 +2118,65 @@ function calcularTarifaServidor(){
     if(entryMode){ if(reg)reg.style.display='block'; if(pay)pay.style.display='none'; if(div)div.style.display='none'; }
     else { if(reg)reg.style.display='none'; if(pay)pay.style.display='block'; if(div)div.style.display='block'; }
   }
+  // ---- Detección automática del tipo de vehículo al escribir la placa ----
+  // Códigos propios: cicla/cicla1… → Cicla · ptelec/ptelec1… (patineta eléctrica) → tarifa Cicla ·
+  // mtelec/mtele1… (moto eléctrica) → tarifa Moto. Placas: ABC123 → Carro · ABC12D / ABC12 → Moto.
+  // Si la placa ya entró antes se respeta el servicio con el que se registró.
+  // El selector de "Servicio" solo se muestra cuando la placa no se reconoce, al pulsar "Cambiar"
+  // o al abrir una entrada existente para cobrar la salida.
+  const SVC_FALLBACK_ID={carro:'5',moto:'6',cicla:'7'}, SVC_NAME_RE={carro:/carro|autom[oó]vil|camioneta/i,moto:/moto/i,cicla:/cicla|bici/i};
+  function svcOptionId(kind){
+    const sel=el('idTarifa'); if(!sel) return null;
+    const opts=Array.from(sel.options).filter(o=>o.value);
+    const byName=opts.find(o=>SVC_NAME_RE[kind].test(o.text));
+    const byId=opts.find(o=>o.value===SVC_FALLBACK_ID[kind]);
+    return (byName||byId||{}).value||null;
+  }
+  function detectServiceByPlate(raw){
+    const p=String(raw||'').toUpperCase().replace(/[\s-]/g,'');
+    if(!p) return null;
+    if(/^(CICLA|CICAL)\d*$/.test(p)) return {kind:'cicla',label:'Cicla'};
+    if(/^PTELEC\d*$/.test(p)) return {kind:'cicla',label:'Patineta eléctrica → tarifa Cicla'};
+    if(/^MTELE[C]?\d*$/.test(p)) return {kind:'moto',label:'Moto eléctrica → tarifa Moto'};
+    if(p.length>=5){
+      const prev=readDB().filter(x=>x&&String(x.placa||'').replace(/[\s-]/g,'').toUpperCase()===p&&x.idTarifa).sort((a,b)=>(+b.id||0)-(+a.id||0))[0];
+      if(prev){ const tid=Array.isArray(prev.idTarifa)?(prev.idTarifa[0]&&prev.idTarifa[0].id):prev.idTarifa; if(tid) return {id:String(tid),label:(getTariff(tid).nombre||'Servicio')+' (según historial)'}; }
+    }
+    if(/^[A-Z]{3}\d{3}$/.test(p)) return {kind:'carro',label:'Carro'};
+    if(/^[A-Z]{3}\d{2}[A-Z]$/.test(p)) return {kind:'moto',label:'Moto'};
+    if(/^[A-Z]{3}\d{2}$/.test(p)) return {kind:'moto',label:'Moto'};
+    return null;
+  }
+  function svcSelectorVisible(v){ ['svcLabel','svcSelectWrap'].forEach(function(id){ const n=el(id); if(n) n.style.display=v?'':'none'; }); }
+  function setPlateHint(html){ const h=el('placaTipoHint'); if(!h) return; if(html){ h.innerHTML=html; h.style.display='block'; } else { h.style.display='none'; h.innerHTML=''; } }
+  function applyPlateDetection(){
+    const sel=el('idTarifa'); if(!sel) return;
+    const raw=value('placa'), p=String(raw||'').toUpperCase().replace(/[\s-]/g,'');
+    // Entrada existente abierta para cobrar: se muestra el servicio con el que entró, sin tocarlo.
+    if(selectedId!=null){ svcSelectorVisible(true); setPlateHint(''); return; }
+    if(!p){ sel.value=''; setPlateHint(''); svcSelectorVisible(false); return; }
+    const r=detectServiceByPlate(raw);
+    let id=null;
+    if(r){ id = r.id && Array.from(sel.options).some(function(o){return o.value===r.id;}) ? r.id : (r.kind ? svcOptionId(r.kind) : null); }
+    if(id){
+      if(sel.value!==id){ sel.value=id; if(typeof window.calcularTarifaServidor==='function') window.calcularTarifaServidor(); }
+      setPlateHint('Detectado: '+escapeHtml(r.label)+' · <a href="#" id="svcChange" style="color:#e67e00;text-decoration:underline">Cambiar</a>');
+      svcSelectorVisible(false);
+      return;
+    }
+    // Sin reconocer: se limpia el servicio para no dejar uno viejo por error.
+    sel.value='';
+    if(p.length>=5){ setPlateHint('Placa no reconocida: elija el servicio.'); svcSelectorVisible(true); }
+    else { setPlateHint(''); svcSelectorVisible(false); }
+  }
   function clearForm(){
     selectedId=null;
+    setPlateHint('');
     setValue('placa',''); setValue('descripcion',''); setValue('nota',''); setValue('idEntrada','0');
     setValue('reciboNumero','0'); setValue('reciboPrefijo','FA'); setValue('entradaFecha',nowString());
     setValue('subtotal','0'); setValue('valor','0'); setValue('valorDescuento','0'); setValue('iva','0'); setValue('retencion','0');
     if(el('idTarifa')) el('idTarifa').value='';
+    svcSelectorVisible(false);
     paymentState.seleccion='cash';
     paymentState.montos={cash:'',nequi:''};
     setPaymentMethod('cash');
@@ -2126,7 +2194,7 @@ function calcularTarifaServidor(){
     setValue('idCliente',data.idCliente||'2'); setValue('idParqueadero',data.idParqueadero||'1'); setValue('idUsuario',data.idUsuario||'3');
     const tid=Array.isArray(data.idTarifa)?(data.idTarifa[0]?.id||''):data.idTarifa;
     setValue('idTarifa',tid||''); setValue('nota',data.nota||''); setValue('descripcion',data.descripcion||'');
-    setValue('placa',data.placa||''); setValue('reciboNumero',data.reciboNumero||'0'); setValue('reciboPrefijo',data.reciboPrefijo||'FA'); setValue('idEntrada',data.id||'0');
+    setValue('placa',data.placa||''); setValue('reciboNumero',data.reciboNumero||'0'); setValue('reciboPrefijo',data.reciboPrefijo||'FA'); setValue('idEntrada',data.id||'0'); applyPlateDetection();
     const savedMethod=data.salidaFecha ? normalizePaymentMethod(data.paymentMethod||data.idTipoPago||'cash') : 'cash';
     paymentState.seleccion=savedMethod||'cash';
     paymentState.montos={cash:paymentState.seleccion==='both' ? String(Number(data.cashAmount)||0) : (paymentState.seleccion==='cash' ? String(Number(data.total)||0) : ''),nequi:paymentState.seleccion==='both' ? String(Number(data.nequiAmount)||0) : (paymentState.seleccion==='nequi' ? String(Number(data.total)||0) : '')};
@@ -2275,7 +2343,8 @@ function calcularTarifaServidor(){
     if(!placa){ fpAlert('Ingrese la placa.','error'); if(el('placa'))el('placa').focus(); return; }
     const monthlyInfo=evaluateMonthlyForPlate(placa);
     if(monthlyInfo.blocked){ fpAlert('No se puede registrar esta entrada: la placa '+placa+' tiene una mensualidad activa.','error'); checkMonthlyPlate(); return; }
-    const tarifaId=value('idTarifa'); if(!tarifaId){ fpAlert('Seleccione el servicio.','error'); return; }
+    if(!value('idTarifa')) applyPlateDetection();
+    const tarifaId=value('idTarifa'); if(!tarifaId){ svcSelectorVisible(true); fpAlert('No se reconoció la placa: seleccione el servicio.','error'); return; }
     const db=readDB();
     if(db.some(x=>!x.salidaFecha && String(x.placa).toUpperCase()===placa)){ fpAlert('Esta placa ya tiene una entrada abierta.','error'); return; }
     const recibo=nextReceipt(), fecha=nowString();
@@ -2758,6 +2827,7 @@ function calcularTarifaServidor(){
     }else{
       clearForm();
       setValue('placa',plate);
+      applyPlateDetection();
       text('impplaca',plate);
       text('imprecibo','');
       text('impentrada','');
@@ -2838,7 +2908,8 @@ function calcularTarifaServidor(){
     resetReceiptCounterV38();
     renderTable();
     clearForm();
-    if(el('idTarifa')) el('idTarifa').addEventListener('change',function(){ if(value('idTarifa')) showCalculation(value('entradaFecha')); });
+    if(el('idTarifa')) el('idTarifa').addEventListener('change',function(){ if(selectedId==null) setPlateHint('Servicio elegido manualmente.'); if(value('idTarifa')) showCalculation(value('entradaFecha')); });
+    if(el('placaTipoHint')) el('placaTipoHint').addEventListener('click',function(ev){ if(ev.target&&ev.target.id==='svcChange'){ ev.preventDefault(); svcSelectorVisible(true); } });
     if(el('plena')) el('plena').addEventListener('change',function(){
       if(this.checked && el('mensualidad')) el('mensualidad').checked=false;
       if(value('idTarifa')) showCalculation(value('entradaFecha'));
@@ -2848,7 +2919,7 @@ function calcularTarifaServidor(){
       if(value('idTarifa')) showCalculation(value('entradaFecha'));
     });
     if(el('placa')) {
-      el('placa').addEventListener('input',function(){this.value=this.value.toUpperCase(); window.myFunction(); checkMonthlyPlate();});
+      el('placa').addEventListener('input',function(){this.value=this.value.toUpperCase(); window.myFunction(); checkMonthlyPlate(); applyPlateDetection();});
       el('placa').addEventListener('focus',function(){ showPlateSuggestions(); });
       el('placa').addEventListener('keydown',function(ev){
         if(ev.key==='ArrowDown'){ ev.preventDefault(); showPlateSuggestions(); movePlateSuggestion(1); }

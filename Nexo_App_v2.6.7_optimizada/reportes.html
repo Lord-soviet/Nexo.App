@@ -1183,14 +1183,18 @@ select.form-control{color:#30343b!important}
 .fp-kpi-card .card-body{padding:18px 10px}
 .fp-kpi-icon{font-size:26px;display:block;margin-bottom:4px}
 .fp-kpi-card h3{margin:0;font-size:22px;font-weight:700}
-.fp-kpi-card p{margin:4px 0 0;color:#aab7ca;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+.fp-kpi-card p{margin:4px 0 0;color:#5b6472;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
 .fp-kpi-blue h3{color:#3aa0ff}
 .fp-kpi-green h3{color:#33c17a}
 .fp-kpi-red h3{color:#e0554a}
 .fp-kpi-orange h3{color:#ff9f00}
 .fp-chart-card .card-body{padding:16px 18px}
-.fp-chart-wrap{width:100%;overflow:hidden}
-.fp-chart-wrap canvas{width:100%;display:block}
+.fp-chart-wrap{width:100%;overflow:hidden;position:relative}
+.fp-chart-wrap canvas{width:100%;display:block;cursor:crosshair}
+.fp-chart-tooltip{position:absolute;display:none;pointer-events:none;background:#0b2748;color:#fff;padding:7px 10px;border-radius:8px;font-size:12px;line-height:1.5;white-space:nowrap;box-shadow:0 8px 20px rgba(0,0,0,.25);z-index:30}
+.fp-chart-tooltip-label{font-weight:700;margin-bottom:2px;color:#ffd699}
+.fp-chart-tooltip-row{display:flex;align-items:center;gap:6px}
+.fp-chart-tooltip-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
 .fp-payment-row{display:flex;align-items:center;gap:8px;font-size:13px}
 .fp-payment-dot{width:12px;height:12px;border-radius:3px;flex:0 0 auto}
 .fp-payment-label{flex:1}
@@ -1238,7 +1242,7 @@ select.form-control{color:#30343b!important}
 
 <div class="card fp-chart-card" style="margin-top:20px">
 <div class="card-body">
-<h5 style="margin-top:0">Ingresos y egresos por día</h5>
+<h5 style="margin-top:0" id="reportDailyTitle">Ingresos y egresos por día</h5>
 <div class="fp-chart-wrap"><canvas id="reportDailyChart"></canvas></div>
 </div>
 </div>
@@ -1262,7 +1266,7 @@ select.form-control{color:#30343b!important}
 <div class="col-md-7">
 <div class="card fp-chart-card" style="height:100%">
 <div class="card-body">
-<h5 style="margin-top:0">Vehículos por día</h5>
+<h5 style="margin-top:0" id="reportVehiclesTitle">Entradas y salidas de vehículos por día</h5>
 <div class="fp-chart-wrap"><canvas id="reportVehiclesChart"></canvas></div>
 </div>
 </div>
@@ -1308,19 +1312,39 @@ select.form-control{color:#30343b!important}
     var next=max+1;localStorage.setItem(COUNTER_KEY,String(next));cfg.nextReceiptNumber=next+1;cfg.receiptPrefix=cfg.receiptPrefix||'FA';localStorage.setItem(CONFIG_KEY,JSON.stringify(cfg));
     return {prefix:cfg.receiptPrefix||'FA',number:next};
   }
+  function activeMonthlyFor(placa){
+    var norm=function(v){return String(v==null?'':v).trim().toUpperCase().replace(/[\s-]/g,'');};
+    var wanted=norm(placa), today=new Date();today.setHours(0,0,0,0);
+    return readArr('fp_monthly').find(function(m){
+      if(!m||norm(m.plate!=null?m.plate:m.placa)!==wanted||m.active===false)return false;
+      var st=m.start?new Date(m.start+'T00:00:00'):null, en=m.end?new Date(m.end+'T00:00:00'):null;
+      if(st&&!isNaN(st)&&today<st)return false;
+      if(en&&!isNaN(en)){en.setDate(en.getDate()+3);if(today>en)return false;}
+      return true;
+    })||null;
+  }
+  function insideNightWindow(m,when){
+    var hm=function(v){var r=String(v==null?'':v).trim().match(/^(\d{1,2}):(\d{2})/);return r?(+r[1])*60+(+r[2]):null;};
+    var a=hm(m.nightEntryLimit),b=hm(m.nightExitLimit);
+    if(a==null||b==null)return true;
+    var n=when.getHours()*60+when.getMinutes();
+    return a<=b?(n>=a&&n<=b):(n>=a||n<=b);
+  }
+  function nowLocalYmd(){var n=new Date();return n.getFullYear()+'-'+pad(n.getMonth()+1)+'-'+pad(n.getDate());}
   function fillTarifaSelect(){
     var sel=document.getElementById('manualTarifa');if(!sel)return;
     sel.innerHTML=getServices().map(function(s){return '<option value="'+String(s.id)+'">'+String(s.name||s.nombre||('Servicio '+s.id))+'</option>';}).join('');
   }
   function setMsg(text,ok){
     var m=document.getElementById('manualEntryMsg');if(!m)return;
-    m.innerHTML='<div class="alert '+(ok?'alert-success':'alert-warning')+'" style="margin-bottom:0">'+text+'</div>';
+    var d=document.createElement('div');d.className='alert '+(ok?'alert-success':'alert-warning');d.style.marginBottom='0';d.textContent=text;m.innerHTML='';m.appendChild(d);
   }
   function initManualEntry(){
     var form=document.getElementById('manualEntryForm');if(!form)return;
     fillTarifaSelect();
     var now=new Date();
     var fechaInput=document.getElementById('manualFecha'), horaInput=document.getElementById('manualHora');
+    if(fechaInput) fechaInput.max=nowLocalYmd();
     if(fechaInput) fechaInput.value=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
     if(horaInput) horaInput.value=pad(now.getHours())+':'+pad(now.getMinutes())+':'+pad(now.getSeconds());
     form.onsubmit=function(e){
@@ -1333,6 +1357,16 @@ select.form-control{color:#30343b!important}
       if(hora.length===5) hora+=':00';
       var fParts=fecha.split('-');
       var entradaFecha=pad(fParts[2])+'-'+pad(fParts[1])+'-'+fParts[0]+' '+hora;
+      var whenEntry=new Date(fecha+'T'+(hora.length===5?hora+':00':hora));
+      if(isNaN(whenEntry)){setMsg('La fecha u hora de entrada no es válida.',false);return;}
+      if(whenEntry>new Date()){setMsg('La fecha y hora de entrada no pueden ser futuras.',false);return;}
+      var monthlyM=activeMonthlyFor(placa), linkedId=null;
+      if(monthlyM){
+        var sched=String(monthlyM.schedule!=null?monthlyM.schedule:'day').toLowerCase();
+        var isNight=(sched==='night'||sched==='noche');
+        if(!isNight||insideNightWindow(monthlyM,whenEntry)){setMsg('La placa '+placa+' tiene una mensualidad activa'+(isNight?' y esa hora está dentro de su horario cubierto':'')+'. No se registra una entrada normal.',false);return;}
+        linkedId=monthlyM.id||null;
+      }
       var descripcion=(document.getElementById('manualDescripcion').value||'').trim()||'NA';
       var db=readArr(DB_KEY);
       var openEntry=db.find(function(x){return x && !x.salidaFecha && String(x.placa||'').toUpperCase()===placa;});
@@ -1357,6 +1391,7 @@ select.form-control{color:#30343b!important}
       }
       var recibo=nextReceipt();
       var entry={id:Date.now(),idParqueadero:'1',idCliente:'2',idTarifa:tarifaId,idUsuario:'3',placa:placa,descripcion:descripcion,nota:'Registrado manualmente desde Reportes',entradaFecha:entradaFecha,entradaHora:hora,reciboPrefijo:recibo.prefix,reciboNumero:recibo.number,salidaFecha:null,salidaHora:null,codigoBarras:'NA',local:true,manual:true};
+      if(linkedId!=null){entry.linkedMonthlyId=linkedId;entry.linkedMonthlyPlate=placa;}
       db.push(entry);
       writeEntries(db);
       setMsg('Vehículo '+placa+' registrado con entrada '+entradaFecha+'.',true);
