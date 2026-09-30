@@ -1,6 +1,6 @@
 # Nexo.app (antes FacaParking) — Sistema de parqueadero offline
 
-**Versión actual: 2.6.17** (la fuente de verdad es `"version"` en `package.json`;
+**Versión actual: 2.6.34** (la fuente de verdad es `"version"` en `package.json`;
 `APP_VERSION` en `mvc/app-controller.js` y `package-lock.json` deben coincidir).
 
 Aplicación de escritorio (Electron) para gestionar un parqueadero: entradas y
@@ -181,6 +181,9 @@ Jerarquía: **Superadmin > Administrador > Empleado**.
 - "Confirmar pago" abre el modal de pago (efectivo / electrónico / ambos, con
   descuento) y **requiere caja abierta**. Al confirmar, las salidas quedan
   como venta de parqueadero en Ventas y en la caja abierta en ese momento.
+- El botón "Historial" de cada fila muestra solo las entradas/salidas de esa
+  placa que siguen pendientes de confirmar (`pendingMonthlyConfirmation:true`),
+  no todo el historial de la placa.
 - Solo Administrador y Superadmin.
 
 ### Caja / Cierre de caja
@@ -229,6 +232,13 @@ Jerarquía: **Superadmin > Administrador > Empleado**.
   editar ni eliminar (el cierre guarda `baseAdded`, `baseRemoved` y `baseFinal`). Editar usa el mismo
   formulario y permite cambiar también el tipo (el registro pasa a la otra
   lista conservando fecha, usuario y caja). Eliminar pide confirmación.
+- **Editar solo el mismo día:** cualquier movimiento (ingreso, egreso o de
+  base) solo se puede editar el mismo día calendario (hora local) en que se
+  registró; pasado ese día el botón de editar queda deshabilitado en la
+  tabla. Eliminar no tiene esa restricción (además de la propia de los
+  movimientos de base, que no se pueden tocar si la caja ya cerró).
+- **Paginación de 10 movimientos por página**, ordenados del más reciente al
+  más antiguo, igual que en Ventas y Pendientes.
 - Registrar uno exige caja abierta y lo asocia a esa caja; por eso entra en el
   resumen de cierre. Se actualiza en tiempo real si hay cambios desde otra
   pestaña/ventana.
@@ -264,6 +274,11 @@ Jerarquía: **Superadmin > Administrador > Empleado**.
   Año/Total → por meses. Al cambiar **Desde/Hasta a mano** el modo pasa a
   "personalizado": por horas si el rango es de un día, por días en cualquier
   otro caso.
+- **Tooltip al pasar el mouse** sobre cualquiera de las dos gráficas: muestra
+  el valor exacto de cada punto (Ingresos/Egresos en pesos, Vehículos en
+  unidades), con una línea guía vertical y el punto resaltado bajo el cursor.
+  El eje Y sigue redondeado (`$33k`, etc.) solo para las marcas de la
+  cuadrícula; el tooltip siempre es el valor real, sin redondear a miles.
 - Exporta a Excel (`.xls`, en realidad HTML que Excel abre) y PDF/impresión sin
   depender de internet.
 - Los cierres de caja guardados **antes** de que las mensualidades se
@@ -396,6 +411,38 @@ Jerarquía: **Superadmin > Administrador > Empleado**.
   de la base"** en **naranja** (`fp_base_in` / `fp_base_out`). La "Base del día"
   de Caja y el resumen de cierre incluyen esos ajustes (con tabla "Movimientos
   de base del día"); la purga diaria también los cubre.
+- **2.6.18**: Pendientes — el modal "Historial" de cada placa ya no muestra
+  todo el historial de esa placa: solo lista las entradas/salidas que siguen
+  pendientes de confirmar (`pendingMonthlyConfirmation:true`).
+- **2.6.19**: Pendientes — la tabla del modal "Historial" ya no hereda el
+  estilo de la tabla grande de Pendientes (que la forzaba a 900px de ancho
+  mínimo dentro de un modal de 640px, obligando a scroll horizontal). Ahora
+  usa su propio estilo compacto (`fp-history-table`), a todo el ancho del
+  modal y sin scroll lateral.
+- **2.6.20**: Pendientes — el modal "Historial" ahora incluye la columna
+  "Recibo" (prefijo + número) de cada salida pendiente, antes solo mostraba
+  entrada, salida y valor.
+- **2.6.21**: Transacciones — los movimientos (ingreso, egreso o de base)
+  solo se pueden editar el mismo día calendario en que se registraron (pasado
+  ese día el botón de editar queda deshabilitado); la tabla de Movimientos
+  ahora pagina de 10 en 10, igual que Ventas y Pendientes.
+- **2.6.22**: Reportes — las dos gráficas (Ingresos/Egresos y Vehículos)
+  ahora muestran un tooltip con el valor exacto de cada punto al pasar el
+  mouse (antes solo se veía la línea/curva, sin cifras); se agregó línea guía
+  vertical y resaltado del punto bajo el cursor (`drawLineChart` +
+  `attachChartHover` en `mvc/app-controller.js`).
+- **2.6.23**: Reportes — (1) gráficas legibles sobre el fondo claro (leyenda, ejes, cuadrícula y fondo blanco también en el PDF/impresión); (2) eje Y con marcas redondas sin repetir (`niceScale`; conteos de vehículos siempre enteros; pesos completos por debajo de $10.000); (3) el tooltip ya no se corta en la parte baja; (4) los títulos de las gráficas y la tabla del Excel/PDF siguen el modo (hora/día/mes); (5) "Registrar vehículo manualmente": bloquea placas con mensualidad activa (permite la nocturna fuera de su horario y la enlaza), no acepta fecha/hora futura y escapa el texto de los avisos; (6) el botón Total ya no arranca en pagos de mensualidad; si Desde > Hasta se intercambian solos.
+- **2.6.24**: Reportes — con rango personalizado de más de 92 días la gráfica agrupa por semanas (lunes a domingo, recortadas al rango) y pasado ~13 meses por meses; el tooltip muestra el rango de la semana o la franja completa de la hora ("14:00 – 14:59"); Excel/PDF usan el mismo agrupamiento. Limpieza: se eliminaron `drawBarChart` (nunca se llamaba), `mapMonthly` y el arreglo `monthly=[]` con todos sus usos en `initReports`, y el campo `days` del snapshot.
+- **2.6.25**: Reportes — un cobro pendiente confirmado cuenta en el día en que se CONFIRMA el pago (KPIs, gráfica por hora/día/semana/mes, desglose de formas de pago), no en el día de la salida del vehículo; usa `confirmedAt` de `fp_monthly_extra_charges`, así que también corrige los pendientes ya confirmados. Ventas (pagos.html) todavía ubica esas ventas por fecha de salida.
+- **2.6.26**: Reportes — la gráfica de Vehículos se separó en dos, una debajo de la otra: "Entradas de vehículos" (por hora de entrada) y "Salidas de vehículos" (por hora/fecha de salida, cobradas o pendientes). Ambas siguen el modo hora/día/semana/mes; Excel y PDF incluyen las dos (columnas Entradas y Salidas). El KPI "Vehículos" sigue contando entradas.
+- **2.6.27**: Reportes — Entradas y Salidas de vehículos van en una sola gráfica con dos líneas (azul = entradas, naranja = salidas); el tooltip muestra ambos valores a la vez. Excel/PDF sin cambios respecto a 2.6.26 (columnas Entradas y Salidas; el PDF trae una sola imagen).
+- **2.6.28**: Resumen de cierre de caja — en la tabla "Ventas de parqueadero del día" la última columna ya no es Fecha sino Descuento (valor `discountAmount` de cada venta, $0 si no tuvo). Aplica al resumen que sale al cerrar, a "Ver reporte" en Reportes y a la descarga.
+- **2.6.29**: Ventas, Cierre de Caja y resumen de cierre — cuando a una venta se le aplicó descuento, toda la fila de la lista queda resaltada en rojo (antes solo la celda del total).
+- **2.6.30**: Mensualidades — el campo "Documento" pasó a "Número telefónico" y se pueden agregar varios números (botón "+ Agregar otro número"). Se guardan en el mismo campo interno `document`, separados por coma, así que los datos existentes se conservan (un documento viejo aparece como un número más). La tabla los muestra uno por línea, la etiqueta por defecto del recibo es "Teléfono" y la importación acepta la columna `telefono` además de `documento`.
+- **2.6.31**: Cierre de Caja — nueva tarjeta informativa "Ingresos" (ingresos manuales de la caja abierta) junto a Egresos, y el resumen de cierre muestra el recuadro "Ingresos manuales". No cambia ningún cálculo: "Ventas" sigue incluyendo los ingresos manuales.
+- **2.6.32**: Ventas — nuevo campo "Buscar por placa o recibo" en los filtros. Filtra mientras se escribe y se combina con las fechas y el tipo de pago; el total de ventas filtradas se recalcula. Acepta el recibo con o sin prefijo (FA105 o 105) e ignora mayúsculas, espacios y guiones.
+- **2.6.33**: Entradas — el servicio se selecciona solo al escribir la placa. Códigos propios: `cicla`/`cicla1`… (o `cical…`) → Cicla; `ptelec`/`ptelec1`… (patineta eléctrica) → tarifa de Cicla; `mtelec`/`mtele1`… (moto eléctrica) → tarifa de Moto. Placas: `ABC123` → Carro; `ABC12D` y `ABC12` → Moto. Si la placa ya entró antes se usa el servicio con que se registró. Bajo el campo aparece "Detectado: …". Si el operador cambia el servicio a mano, deja de sobrescribirse hasta borrar la placa. El campo Placa admite hasta 10 caracteres (antes 6) para los códigos con número.
+- **2.6.34**: Entradas — la detección del servicio por placa quedó automática y reforzada. El selector "Servicio" ya no se muestra cuando la placa se reconoce (aparece "Detectado: … · Cambiar"); solo se ve si la placa no se reconoce (5+ caracteres), al pulsar "Cambiar" o al abrir una entrada para cobrar la salida. Si la placa no se reconoce o se borra, el servicio se limpia (no queda uno viejo). Al elegir una sugerencia de placa que ya salió también se detecta. Los servicios se buscan por nombre (Carro, Moto, Cicla) además de por id, y `registrar()` vuelve a detectar como red de seguridad. Se quitó `required` del selector porque ahora puede estar oculto (registrar() ya lo valida).
 
 ### Serie v37 → V131
 Historial resumido de los parches aplicados, en orden. Cada punto refleja lo

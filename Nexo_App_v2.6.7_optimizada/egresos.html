@@ -1180,6 +1180,8 @@ select.form-control{color:#30343b!important}
 .btn i:only-child{margin-right:0!important}
 .editMovement{width:38px!important;height:38px!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;background:var(--fp-nav-blue)!important;color:#fff!important;border:1px solid var(--fp-nav-blue)!important;border-radius:7px!important;box-shadow:none!important;margin-right:6px!important}
 .editMovement i{margin:0!important;font-size:14px!important;color:#fff!important}
+.editMovement:disabled{background:#eef1f4!important;border-color:#d7dce2!important;color:#8a929c!important;cursor:not-allowed!important;opacity:1!important}
+.editMovement:disabled i{color:#8a929c!important}
 .delMovement{width:38px!important;height:38px!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;border-radius:7px!important;box-shadow:none!important}
 .delMovement i{margin:0!important;font-size:14px!important}
 .fp-modal-overlay{position:fixed;inset:0;background:rgba(10,20,35,.55);display:none;align-items:center;justify-content:center;z-index:3000;padding:20px}
@@ -1231,7 +1233,7 @@ tr.fp-mov-base .fp-mov-amount{color:#c25e00;font-weight:700}
 <li class="nav-item active-pro"><a class="nav-link" href="login.html" id="fpLogout"><i class="fa fa-sign-out"></i><p>Salir</p></a></li>
 </ul></div></div><div class="main-panel"><nav class="navbar navbar-expand-lg navbar-transparent navbar-absolute fixed-top"><div class="container-fluid"><div class="navbar-wrapper"><a class="navbar-brand" href="#">Transacciones</a></div></div></nav><div class="content"><div class="container-fluid">
 
-<div class="row"><div class="col-md-12"><div class="card"><div class="card-header card-header-primary"><h4 class="card-title">Movimientos</h4></div><div class="card-body"><div class="fp-mov-toolbar"><span class="fp-mov-base-info" id="movementBaseInfo"></span><button type="button" class="btn btn-primary" id="newMovementBtn">+ Registrar nuevo movimiento</button></div><div class="table-responsive"><table class="table" id="movementsTable"><thead class="text-primary"><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Valor</th><th>Usuario</th><th>Caja</th><th>Acciones</th></tr></thead><tbody></tbody></table></div></div></div></div></div>
+<div class="row"><div class="col-md-12"><div class="card"><div class="card-header card-header-primary"><h4 class="card-title">Movimientos</h4></div><div class="card-body"><div class="fp-mov-toolbar"><span class="fp-mov-base-info" id="movementBaseInfo"></span><button type="button" class="btn btn-primary" id="newMovementBtn">+ Registrar nuevo movimiento</button></div><div class="table-responsive"><table class="table" id="movementsTable"><thead class="text-primary"><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Valor</th><th>Usuario</th><th>Caja</th><th>Acciones</th></tr></thead><tbody></tbody></table></div><div id="movementsPager" class="fp-pager"></div></div></div></div></div>
 
 </div></div>
 

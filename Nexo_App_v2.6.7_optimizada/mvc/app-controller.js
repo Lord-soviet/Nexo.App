@@ -5,7 +5,7 @@
 'use strict';
 const {KEY,defaults,get,set,entries,paymentLabel,cashPart,plateUpper,hashPassword,verifyPassword,needsRehash}=window.FPModel;
 /* Mantener igual a "version" de package.json (y a package-lock.json). */
-const APP_VERSION='2.6.17';
+const APP_VERSION='2.6.34';
 /* Historial de ingresos (login history): la clave debe quedar disponible en
  * todo el archivo, no solo dentro de initLogin(), porque initLoginHistory()
  * (usada en Configuración) también la necesita. Antes estaba declarada solo
@@ -252,64 +252,14 @@ function dayLabel(d){return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)}
 function startOfDay(d){const x=new Date(d);x.setHours(0,0,0,0);return x}
 function endOfDay(d){const x=new Date(d);x.setHours(23,59,59,999);return x}
 function ymdInput(d){return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())}
-function drawBarChart(canvasId,labels,series,opts){
- opts=opts||{};
- const canvas=document.getElementById(canvasId);
- if(!canvas) return;
- const wrap=canvas.parentElement;
- const cssWidth=Math.max((wrap&&wrap.clientWidth)||canvas.clientWidth||600,260);
- const cssHeight=opts.height||260;
- const dpr=window.devicePixelRatio||1;
- canvas.width=cssWidth*dpr; canvas.height=cssHeight*dpr;
- canvas.style.width=cssWidth+'px'; canvas.style.height=cssHeight+'px';
- const ctx=canvas.getContext('2d');
- ctx.setTransform(dpr,0,0,dpr,0,0);
- ctx.clearRect(0,0,cssWidth,cssHeight);
- if(!labels.length){
-   ctx.fillStyle='#7c8ba1'; ctx.font='13px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
-   ctx.fillText('Sin datos para el período seleccionado',cssWidth/2,cssHeight/2);
-   return;
- }
- const padding={top:26,right:18,bottom:30,left:opts.leftPad||58};
- const chartW=cssWidth-padding.left-padding.right, chartH=cssHeight-padding.top-padding.bottom;
- const maxVal=Math.max(1,...series.flatMap(s=>s.values));
- const steps=4;
- ctx.strokeStyle='rgba(150,180,215,.16)'; ctx.lineWidth=1;
- ctx.fillStyle='#8fa0b8'; ctx.font='11px Arial'; ctx.textAlign='right'; ctx.textBaseline='middle';
- for(let i=0;i<=steps;i++){
-   const y=padding.top+chartH-(chartH*i/steps);
-   ctx.beginPath(); ctx.moveTo(padding.left,y); ctx.lineTo(cssWidth-padding.right,y); ctx.stroke();
-   const val=maxVal*i/steps;
-   ctx.fillText(opts.formatY?opts.formatY(val):String(Math.round(val)),padding.left-8,y);
- }
- const n=labels.length, groupW=chartW/n, seriesCount=series.length;
- const barGap=Math.max(2,groupW*0.12);
- const barW=Math.max(3,(groupW-barGap*2)/seriesCount);
- const skip=n>16?Math.ceil(n/16):1;
- labels.forEach((lab,i)=>{
-   const groupX=padding.left+i*groupW;
-   series.forEach((s,si)=>{
-     const val=s.values[i]||0;
-     const barH=maxVal>0?(val/maxVal)*chartH:0;
-     const x=groupX+barGap+si*barW;
-     const y=padding.top+chartH-barH;
-     ctx.fillStyle=s.color;
-     if(barH>0) ctx.fillRect(x,y,Math.max(barW-2,1),barH);
-   });
-   if(i%skip===0){
-     ctx.fillStyle='#8fa0b8'; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.font='10px Arial';
-     ctx.fillText(lab,groupX+groupW/2,padding.top+chartH+6);
-   }
- });
- if(series.length>1){
-   let lx=padding.left;
-   series.forEach(s=>{
-     ctx.fillStyle=s.color; ctx.fillRect(lx,4,10,10);
-     ctx.fillStyle='#cfd9e6'; ctx.textAlign='left'; ctx.textBaseline='top'; ctx.font='11px Arial';
-     ctx.fillText(s.name,lx+14,3);
-     lx+=14+ctx.measureText(s.name).width+18;
-   });
- }
+function niceScale(max,integer){
+ max=Math.max(1,Number(max)||1);
+ if(integer&&max<=4){const m=Math.ceil(max);return {max:m,steps:m}}
+ const steps=4, rough=max/steps, mag=Math.pow(10,Math.floor(Math.log10(rough))), norm=rough/mag;
+ const cands=integer?[1,2,5,10]:[1,2,2.5,5,10];
+ let nice=cands.find(c=>norm<=c+1e-9)||10, step=nice*mag;
+ if(integer) step=Math.max(1,Math.ceil(step));
+ return {max:step*steps,steps};
 }
 function drawLineChart(canvasId,labels,series,opts){
  opts=opts||{};
@@ -323,55 +273,104 @@ function drawLineChart(canvasId,labels,series,opts){
  canvas.style.width=cssWidth+'px'; canvas.style.height=cssHeight+'px';
  const ctx=canvas.getContext('2d');
  ctx.setTransform(dpr,0,0,dpr,0,0);
- ctx.clearRect(0,0,cssWidth,cssHeight);
- if(!labels.length){
-   ctx.fillStyle='#7c8ba1'; ctx.font='13px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
-   ctx.fillText('Sin datos para el período seleccionado',cssWidth/2,cssHeight/2);
-   return;
- }
- const padding={top:26,right:18,bottom:30,left:opts.leftPad||58};
- const chartW=cssWidth-padding.left-padding.right, chartH=cssHeight-padding.top-padding.bottom;
- const maxVal=Math.max(1,...series.flatMap(s=>s.values));
- const steps=4;
- ctx.strokeStyle='rgba(150,180,215,.16)'; ctx.lineWidth=1;
- ctx.fillStyle='#8fa0b8'; ctx.font='11px Arial'; ctx.textAlign='right'; ctx.textBaseline='middle';
- for(let i=0;i<=steps;i++){
-   const y=padding.top+chartH-(chartH*i/steps);
-   ctx.beginPath(); ctx.moveTo(padding.left,y); ctx.lineTo(cssWidth-padding.right,y); ctx.stroke();
-   const val=maxVal*i/steps;
-   ctx.fillText(opts.formatY?opts.formatY(val):String(Math.round(val)),padding.left-8,y);
- }
- const n=labels.length;
- const stepX=n>1?chartW/(n-1):0;
- const xAt=i=>padding.left+(n>1?i*stepX:chartW/2);
- const yAt=val=>padding.top+chartH-(maxVal>0?(val/maxVal)*chartH:0);
- const skip=n>16?Math.ceil(n/16):1;
- labels.forEach((lab,i)=>{
-   if(i%skip===0){
-     ctx.fillStyle='#8fa0b8'; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.font='10px Arial';
-     ctx.fillText(lab,xAt(i),padding.top+chartH+6);
+
+ // paint(hoverIndex): dibuja la gráfica completa; si hoverIndex viene con un índice válido,
+ // además resalta ese punto (línea guía + puntos más grandes) para el tooltip "puntual" al pasar
+ // el mouse. Se reutiliza tanto para el dibujo inicial como para cada redibujo en mousemove.
+ function paint(hoverIndex){
+   ctx.clearRect(0,0,cssWidth,cssHeight);
+   ctx.fillStyle='#fff'; ctx.fillRect(0,0,cssWidth,cssHeight);
+   if(!labels.length){
+     ctx.fillStyle='#5b6472'; ctx.font='13px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+     ctx.fillText('Sin datos para el período seleccionado',cssWidth/2,cssHeight/2);
+     return null;
    }
- });
- series.forEach(s=>{
-   ctx.strokeStyle=s.color; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.lineCap='round';
-   ctx.beginPath();
-   s.values.forEach((val,i)=>{const x=xAt(i),y=yAt(val||0); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);});
-   ctx.stroke();
-   ctx.fillStyle=s.color;
-   s.values.forEach((val,i)=>{
-     const x=xAt(i),y=yAt(val||0);
-     ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2); ctx.fill();
+   const padding={top:26,right:18,bottom:30,left:opts.leftPad||58};
+   const chartW=cssWidth-padding.left-padding.right, chartH=cssHeight-padding.top-padding.bottom;
+   const scale=niceScale(Math.max(1,...series.flatMap(s=>s.values)),!!opts.integer);
+   const maxVal=scale.max, steps=scale.steps;
+   ctx.strokeStyle='rgba(0,0,0,.09)'; ctx.lineWidth=1;
+   ctx.fillStyle='#5b6472'; ctx.font='11px Arial'; ctx.textAlign='right'; ctx.textBaseline='middle';
+   for(let i=0;i<=steps;i++){
+     const y=padding.top+chartH-(chartH*i/steps);
+     ctx.beginPath(); ctx.moveTo(padding.left,y); ctx.lineTo(cssWidth-padding.right,y); ctx.stroke();
+     const val=maxVal*i/steps;
+     ctx.fillText(opts.formatY?opts.formatY(val):String(Math.round(val)),padding.left-8,y);
+   }
+   const n=labels.length;
+   const stepX=n>1?chartW/(n-1):0;
+   const xAt=i=>padding.left+(n>1?i*stepX:chartW/2);
+   const yAt=val=>padding.top+chartH-(maxVal>0?(val/maxVal)*chartH:0);
+   const skip=n>16?Math.ceil(n/16):1;
+   labels.forEach((lab,i)=>{
+     if(i%skip===0){
+       ctx.fillStyle='#5b6472'; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.font='10px Arial';
+       ctx.fillText(lab,xAt(i),padding.top+chartH+6);
+     }
    });
- });
- if(series.length>1){
-   let lx=padding.left;
+   if(hoverIndex!=null&&hoverIndex>=0&&hoverIndex<n){
+     const hx=xAt(hoverIndex);
+     ctx.save(); ctx.strokeStyle='rgba(60,72,90,.55)'; ctx.setLineDash([4,4]); ctx.lineWidth=1;
+     ctx.beginPath(); ctx.moveTo(hx,padding.top); ctx.lineTo(hx,padding.top+chartH); ctx.stroke();
+     ctx.restore();
+   }
    series.forEach(s=>{
-     ctx.fillStyle=s.color; ctx.fillRect(lx,4,10,10);
-     ctx.fillStyle='#cfd9e6'; ctx.textAlign='left'; ctx.textBaseline='top'; ctx.font='11px Arial';
-     ctx.fillText(s.name,lx+14,3);
-     lx+=14+ctx.measureText(s.name).width+18;
+     ctx.strokeStyle=s.color; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.lineCap='round';
+     ctx.beginPath();
+     s.values.forEach((val,i)=>{const x=xAt(i),y=yAt(val||0); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);});
+     ctx.stroke();
+     s.values.forEach((val,i)=>{
+       const x=xAt(i),y=yAt(val||0),isHover=hoverIndex===i;
+       ctx.beginPath(); ctx.fillStyle=s.color; ctx.arc(x,y,isHover?5.5:3,0,Math.PI*2); ctx.fill();
+       if(isHover){ctx.lineWidth=1.5;ctx.strokeStyle='#fff';ctx.stroke();}
+     });
    });
+   if(series.length>1){
+     let lx=padding.left;
+     series.forEach(s=>{
+       ctx.fillStyle=s.color; ctx.fillRect(lx,4,10,10);
+       ctx.fillStyle='#30343b'; ctx.textAlign='left'; ctx.textBaseline='top'; ctx.font='11px Arial';
+       ctx.fillText(s.name,lx+14,3);
+       lx+=14+ctx.measureText(s.name).width+18;
+     });
+   }
+   return {padding,chartW,chartH,maxVal,n,stepX,xAt,yAt};
  }
+
+ const layout=paint(null);
+ canvas.__fpResetChart=()=>paint(null);
+ if(layout) attachChartHover(canvas,wrap,labels,series,layout,opts,paint);
+}
+// Tooltip al pasar el mouse: muestra el valor exacto de cada punto ("más puntual" que solo la
+// línea/curva). Usa onmousemove/onmouseleave (no addEventListener) para no ir acumulando
+// listeners cada vez que Reportes vuelve a dibujar la gráfica (cambio de rango, resize, refresh).
+function attachChartHover(canvas,wrap,labels,series,layout,opts,paint){
+ if(wrap&&getComputedStyle(wrap).position==='static') wrap.style.position='relative';
+ let tip=wrap&&wrap.querySelector('.fp-chart-tooltip');
+ if(wrap&&!tip){tip=document.createElement('div');tip.className='fp-chart-tooltip';wrap.appendChild(tip);}
+ const fmtTip=opts.formatTooltip||opts.formatY||(v=>String(Math.round(v)));
+ function indexFromClientX(clientX){
+   const rect=canvas.getBoundingClientRect();
+   const {padding,stepX,n}=layout;
+   if(n<=1) return 0;
+   const x=clientX-rect.left;
+   return Math.max(0,Math.min(n-1,Math.round((x-padding.left)/stepX)));
+ }
+ canvas.onmousemove=(e)=>{
+   const idx=indexFromClientX(e.clientX);
+   paint(idx);
+   if(!tip) return;
+   tip.innerHTML='<div class="fp-chart-tooltip-label">'+esc((opts.tooltipLabels||labels)[idx])+'</div>'+series.map(s=>'<div class="fp-chart-tooltip-row"><span class="fp-chart-tooltip-dot" style="background:'+s.color+'"></span>'+esc(s.name)+': <b>'+esc(fmtTip(s.values[idx]||0))+'</b></div>').join('');
+   tip.style.display='block';
+   const rect=canvas.getBoundingClientRect();
+   let left=layout.xAt(idx)+12;
+   const maxLeft=rect.width-tip.offsetWidth-6;
+   if(left>maxLeft) left=layout.xAt(idx)-tip.offsetWidth-12;
+   if(left<0) left=4;
+   tip.style.left=left+'px';
+   tip.style.top=Math.max(0,Math.min((e.clientY-rect.top)-12,rect.height-tip.offsetHeight-4))+'px';
+ };
+ canvas.onmouseleave=()=>{if(tip)tip.style.display='none';paint(null);};
 }
 function isAdminLevelRole(role){const r=String(role||'Empleado').trim().toLowerCase();return r==='administrador'||r==='superadmin'}
 /* Renovación automática de mensualidades pagadas por adelantado.
@@ -782,13 +781,17 @@ function initPayments(){
    let from=f.from.value?new Date(f.from.value+'T00:00:00'):new Date('2000-01-01');
    let to=f.to.value?new Date(f.to.value+'T23:59:59'):new Date('2999-12-31');
    let q=f.payment.value;
+   // Búsqueda por placa o código de recibo (con o sin prefijo; ignora mayúsculas, espacios y guiones).
+   const norm=v=>String(v==null?'':v).toLowerCase().replace(/[\s\-]/g,'');
+   const term=norm(f.elements.search?f.elements.search.value:'');
+   const matchTerm=e=>{if(!term)return true;const rec=norm(e.reciboPrefijo||'FA')+norm(e.reciboNumero||'');return norm(e.placa||e.plate).includes(term)||rec.includes(term)||norm(e.reciboNumero)===term;};
    allRows=db.filter(e=>{
      let d=parseFPDate(e.salidaFecha),p=paymentType(e);
-     return d&&d>=from&&d<=to&&(!q||p===q);
+     return d&&d>=from&&d<=to&&(!q||p===q)&&matchTerm(e);
    }).sort((a,b)=>(parseFPDate(b.salidaFecha)||0)-(parseFPDate(a.salidaFecha)||0));
    let pages=Math.max(1,Math.ceil(allRows.length/pageSize));if(page>pages)page=pages;
    let rows=allRows.slice((page-1)*pageSize,page*pageSize);
-   tb.innerHTML=rows.map((e,i)=>`<tr><td>${esc(e.reciboPrefijo||'FA')}${esc(e.reciboNumero||'')}</td><td>${esc(e.placa||e.plate||'')}</td><td>${esc(e.entradaFecha)}</td><td>${esc(e.salidaFecha)}</td><td>${esc(paymentLabel(e))}</td><td${(+e.discountAmount>0)?' style="color:#e53935;font-weight:700" title="Venta con descuento aplicado"':''}>${money(e.total)}</td><td>${money(e.cashAmount||0)}</td><td>${money(e.nequiAmount||0)}</td><td><button type="button" class="btn btn-sm btn-warning printSale" data-i="${i}" title="Imprimir recibo" aria-label="Imprimir recibo"><svg class="fp-print-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v5a2 2 0 0 1 2 2h2M6 14h12v7H6z"/></svg></button><button type="button" class="btn btn-sm editSale" data-i="${i}" title="Editar forma de pago" aria-label="Editar forma de pago"><i class="fa fa-pencil"></i></button></td></tr>`).join('')||'<tr><td colspan="9">Sin movimientos para el filtro seleccionado.</td></tr>';
+   tb.innerHTML=rows.map((e,i)=>`<tr${(+e.discountAmount>0)?' class="fp-disc-row" title="Venta con descuento aplicado"':''}><td>${esc(e.reciboPrefijo||'FA')}${esc(e.reciboNumero||'')}</td><td>${esc(e.placa||e.plate||'')}</td><td>${esc(e.entradaFecha)}</td><td>${esc(e.salidaFecha)}</td><td>${esc(paymentLabel(e))}</td><td>${money(e.total)}</td><td>${money(e.cashAmount||0)}</td><td>${money(e.nequiAmount||0)}</td><td><button type="button" class="btn btn-sm btn-warning printSale" data-i="${i}" title="Imprimir recibo" aria-label="Imprimir recibo"><svg class="fp-print-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v5a2 2 0 0 1 2 2h2M6 14h12v7H6z"/></svg></button><button type="button" class="btn btn-sm editSale" data-i="${i}" title="Editar forma de pago" aria-label="Editar forma de pago"><i class="fa fa-pencil"></i></button></td></tr>`).join('')||'<tr><td colspan="9">Sin movimientos para el filtro seleccionado.</td></tr>';
    total.textContent=money(allRows.reduce((a,e)=>a+(+e.total||0),0));
    tb.querySelectorAll('.printSale').forEach(b=>b.onclick=()=>printSaleReceipt(rows[+b.dataset.i]));
    tb.querySelectorAll('.editSale').forEach(b=>b.onclick=()=>openEditSalePayment(rows[+b.dataset.i]));
@@ -872,7 +875,7 @@ function initPayments(){
    overlay.style.display='flex';
  }
 
- if(f)f.onsubmit=e=>{e.preventDefault();page=1;render()};window.addEventListener('storage',()=>render());render()
+ if(f)f.onsubmit=e=>{e.preventDefault();page=1;render()};if(f&&f.elements.search)f.elements.search.addEventListener('input',()=>{page=1;render()});window.addEventListener('storage',()=>render());render()
 }
 
 function fpAddMonthsClamped(date,months){
@@ -976,13 +979,19 @@ function printSaleReceipt(e){
  }catch(err){console.error(err);fpAlert('No fue posible preparar el recibo para imprimir.');}
 }
 
+// Eje Y de plata: valor completo si es menor a $10.000; en miles ($12k, $2,5k) desde ahí.
+function fmtAxisMoney(v){
+ v=Number(v)||0;
+ if(Math.abs(v)<10000) return money(v);
+ return '$'+(v/1000).toFixed(1).replace(/\.0$/,'').replace('.',',')+'k';
+}
 function initReports(){
  ensure();
  const fromEl=document.getElementById('reportFrom'), toEl=document.getElementById('reportTo');
  if(!fromEl||!toEl) return;
 
- function mapMonthly(list){return list.map(e=>({...e,total:Number(e.value)||0,cashAmount:Number(e.cashAmount)||0,nequiAmount:Number(e.nequiAmount)||0}))}
  function rangeDates(){
+   if(fromEl.value&&toEl.value&&fromEl.value>toEl.value){const t=fromEl.value;fromEl.value=toEl.value;toEl.value=t}
    const from=fromEl.value?startOfDay(new Date(fromEl.value+'T00:00:00')):null;
    const to=toEl.value?endOfDay(new Date(toEl.value+'T00:00:00')):null;
    return {from,to};
@@ -998,20 +1007,26 @@ function initReports(){
    const {from,to}=rangeDates();
    const allEntries=entriesFull();
    const vehiculos=allEntries.filter(e=>within(parseFPDate(e.entradaFecha),from,to));
-   const parkSales=allEntries.filter(e=>e.salidaFecha&&!e.pendingMonthlyConfirmation&&within(parseFPDate(e.salidaFecha),from,to));
+   // Salidas físicas de vehículos en el período (por la fecha/hora de salida, estén cobradas o pendientes).
+   const salidasV=allEntries.filter(e=>e.salidaFecha&&within(parseFPDate(e.salidaFecha),from,to));
+   // Un cobro pendiente (salida de placa con mensualidad, ver Pendientes) es venta el día en que se
+   // CONFIRMA el pago, no el día de la salida: esa es la fecha con la que entra a la caja abierta.
+   // La fecha de confirmación sale de fp_monthly_extra_charges (confirmedAt), así que también
+   // corrige los pendientes que ya se habían confirmado antes. Sin registro, se usa la salida.
+   const confirmedAt=new Map();
+   get('fp_monthly_extra_charges',[]).forEach(x=>{if(x&&x.confirmed&&x.entryId!=null&&x.confirmedAt)confirmedAt.set(String(x.entryId),x.confirmedAt)});
+   const saleDate=e=>parseFPDate(confirmedAt.get(String(e.id))||e.salidaFecha);
+   const parkSales=allEntries.filter(e=>e.salidaFecha&&!e.pendingMonthlyConfirmation&&within(saleDate(e),from,to));
    // Los pagos de mensualidades no se incluyen en el panel general de Reportes (Ingresos,
    // gráfica, formas de pago): tienen su propio reporte en Mensualidades ("Reporte de
-   // mensualidades"). Se deja el arreglo vacío en vez de borrar cada uso de "monthly" abajo,
-   // para que KPIs, gráfica y desglose de formas de pago queden en cero automáticamente.
-   const monthly=[];
+   // mensualidades").
    const expensesArr=get('fp_expenses',[]).filter(e=>within(parseFPDate(e.dateTime),from,to));
    const incomesArr=get('fp_incomes',[]).filter(e=>within(parseFPDate(e.dateTime),from,to));
    const closuresArr=get('fp_cash_closings',[]).filter(e=>within(parseFPDate(e.closedAt),from,to)).sort((a,b)=>new Date(a.closedAt)-new Date(b.closedAt));
 
    const ventasTotal=parkSales.reduce((a,x)=>a+(Number(x.total)||0),0);
-   const mensualidadesTotal=monthly.reduce((a,x)=>a+(Number(x.total)||0),0);
    const ingresosManualesTotal=incomesArr.reduce((a,x)=>a+(Number(x.amount)||0),0);
-   const ingresos=ventasTotal+mensualidadesTotal+ingresosManualesTotal;
+   const ingresos=ventasTotal+ingresosManualesTotal;
    const egresos=expensesArr.reduce((a,x)=>a+(Number(x.amount)||0),0);
    const ganancia=ingresos-egresos;
 
@@ -1022,9 +1037,8 @@ function initReports(){
    if(gEl){gEl.textContent=money(ganancia);gEl.style.color=ganancia<0?'#ff6b6b':'';}
    const periodEl=document.getElementById('reportPeriodLabel'); if(periodEl) periodEl.textContent=periodLabel(from,to);
 
-   const allSales=parkSales.concat(monthly);
    let cash=0,electronic=0,unknown=0;
-   allSales.forEach(x=>{
+   parkSales.forEach(x=>{
      const label=paymentLabel(x), total=Number(x.total)||0;
      if(label==='Efectivo') cash+=total;
      else if(label==='Electrónico') electronic+=total;
@@ -1045,12 +1059,12 @@ function initReports(){
    // Los datos siguen conservando el detalle diario en el snapshot/exportación.
    const selectedMode=window.__fpReportMode||'week';
    const dayMap=new Map();
-   function ensureDay(d){const k=dayKey(d); if(!dayMap.has(k)) dayMap.set(k,{date:new Date(d.getFullYear(),d.getMonth(),d.getDate()),ingresos:0,egresos:0,vehiculos:0}); return dayMap.get(k)}
-   parkSales.forEach(x=>{const d=parseFPDate(x.salidaFecha); if(d) ensureDay(d).ingresos+=Number(x.total)||0});
-   monthly.forEach(x=>{const d=parseFPDate(x.dateTime); if(d) ensureDay(d).ingresos+=Number(x.total)||0});
+   function ensureDay(d){const k=dayKey(d); if(!dayMap.has(k)) dayMap.set(k,{date:new Date(d.getFullYear(),d.getMonth(),d.getDate()),ingresos:0,egresos:0,vehiculos:0,salidas:0}); return dayMap.get(k)}
+   parkSales.forEach(x=>{const d=saleDate(x); if(d) ensureDay(d).ingresos+=Number(x.total)||0});
    incomesArr.forEach(x=>{const d=parseFPDate(x.dateTime); if(d) ensureDay(d).ingresos+=Number(x.amount)||0});
    expensesArr.forEach(x=>{const d=parseFPDate(x.dateTime); if(d) ensureDay(d).egresos+=Number(x.amount)||0});
    vehiculos.forEach(x=>{const d=parseFPDate(x.entradaFecha); if(d) ensureDay(d).vehiculos+=1});
+   salidasV.forEach(x=>{const d=parseFPDate(x.salidaFecha); if(d) ensureDay(d).salidas+=1});
 
    const rangeSpanDays=(from&&to)?Math.round((startOfDay(to)-startOfDay(from))/86400000)+1:null;
    function makeDays(){
@@ -1058,13 +1072,13 @@ function initReports(){
        return Array.from({length:rangeSpanDays},(_,i)=>{
          const d=new Date(from.getFullYear(),from.getMonth(),from.getDate()+i);
          const found=dayMap.get(dayKey(d));
-         return found?{...found,date:d}:{date:d,ingresos:0,egresos:0,vehiculos:0};
+         return found?{...found,date:d}:{date:d,ingresos:0,egresos:0,vehiculos:0,salidas:0};
        });
      }
      const arr=Array.from(dayMap.values()).sort((a,b)=>a.date-b.date);
      if(arr.length) return arr;
      const today=startOfDay(new Date());
-     return Array.from({length:7},(_,i)=>{const d=new Date(today);d.setDate(d.getDate()-(6-i));return {date:d,ingresos:0,egresos:0,vehiculos:0}});
+     return Array.from({length:7},(_,i)=>{const d=new Date(today);d.setDate(d.getDate()-(6-i));return {date:d,ingresos:0,egresos:0,vehiculos:0,salidas:0}});
    }
    const days=makeDays();
 
@@ -1084,51 +1098,84 @@ function initReports(){
    }
    function buildHourly(startHour){
      startHour=Math.max(0,Math.min(23,startHour||0));
-     const hours=Array.from({length:24-startHour},(_,i)=>{const h=startHour+i;return {hour:h,label:hourLabel(h),ingresos:0,egresos:0,vehiculos:0}});
+     const hours=Array.from({length:24-startHour},(_,i)=>{const h=startHour+i;return {hour:h,label:hourLabel(h),ingresos:0,egresos:0,vehiculos:0,salidas:0}});
      const idx=h=>h-startHour;
-     parkSales.forEach(x=>{const d=parseFPDate(x.salidaFecha);if(d&&d.getHours()>=startHour)hours[idx(d.getHours())].ingresos+=Number(x.total)||0});
-     monthly.forEach(x=>{const d=parseFPDate(x.dateTime);if(d&&d.getHours()>=startHour)hours[idx(d.getHours())].ingresos+=Number(x.total)||0});
+     parkSales.forEach(x=>{const d=saleDate(x);if(d&&d.getHours()>=startHour)hours[idx(d.getHours())].ingresos+=Number(x.total)||0});
      incomesArr.forEach(x=>{const d=parseFPDate(x.dateTime);if(d&&d.getHours()>=startHour)hours[idx(d.getHours())].ingresos+=Number(x.amount)||0});
      expensesArr.forEach(x=>{const d=parseFPDate(x.dateTime);if(d&&d.getHours()>=startHour)hours[idx(d.getHours())].egresos+=Number(x.amount)||0});
      vehiculos.forEach(x=>{const d=parseFPDate(x.entradaFecha);if(d&&d.getHours()>=startHour)hours[idx(d.getHours())].vehiculos+=1});
+     salidasV.forEach(x=>{const d=parseFPDate(x.salidaFecha);if(d&&d.getHours()>=startHour)hours[idx(d.getHours())].salidas+=1});
      return hours;
+   }
+   // Rangos largos por días (más de ~3 meses) dibujarían cientos de puntos: se agrupan por semanas
+   // (lunes a domingo, recortadas al rango elegido). Pasado ~13 meses se agrupa por meses.
+   function mondayOf(d){const x=startOfDay(d);x.setDate(x.getDate()-((x.getDay()+6)%7));return x}
+   function buildWeekly(){
+     const map=new Map();
+     const bucket=d=>{const m=mondayOf(d),k=dayKey(m);if(!map.has(k))map.set(k,{date:m,ingresos:0,egresos:0,vehiculos:0,salidas:0});return map.get(k)};
+     parkSales.forEach(x=>{const d=saleDate(x);if(d)bucket(d).ingresos+=Number(x.total)||0});
+     incomesArr.forEach(x=>{const d=parseFPDate(x.dateTime);if(d)bucket(d).ingresos+=Number(x.amount)||0});
+     expensesArr.forEach(x=>{const d=parseFPDate(x.dateTime);if(d)bucket(d).egresos+=Number(x.amount)||0});
+     vehiculos.forEach(x=>{const d=parseFPDate(x.entradaFecha);if(d)bucket(d).vehiculos+=1});
+     salidasV.forEach(x=>{const d=parseFPDate(x.salidaFecha);if(d)bucket(d).salidas+=1});
+     const out=[];
+     for(let m=mondayOf(from);m<=to;m=new Date(m.getFullYear(),m.getMonth(),m.getDate()+7)){
+       const f=map.get(dayKey(m));
+       out.push(f?{...f,date:new Date(m)}:{date:new Date(m),ingresos:0,egresos:0,vehiculos:0,salidas:0});
+     }
+     return out;
+   }
+   function weekRange(m){
+     const a=m<from?from:m, e=new Date(m.getFullYear(),m.getMonth(),m.getDate()+6), b=e>to?to:e;
+     return {a,b};
    }
    function monthKey(d){return d.getFullYear()+'-'+pad2(d.getMonth()+1)}
    function monthLabel(d){return ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][d.getMonth()]+'/'+String(d.getFullYear()).slice(-2)}
    function buildMonthly(){
      const map=new Map();
-     const add=(d,field,val)=>{if(!d)return;const k=monthKey(d);if(!map.has(k))map.set(k,{date:new Date(d.getFullYear(),d.getMonth(),1),ingresos:0,egresos:0,vehiculos:0});map.get(k)[field]+=val};
-     parkSales.forEach(x=>{const d=parseFPDate(x.salidaFecha);add(d,'ingresos',Number(x.total)||0)});
-     monthly.forEach(x=>{const d=parseFPDate(x.dateTime);add(d,'ingresos',Number(x.total)||0)});
+     const add=(d,field,val)=>{if(!d)return;const k=monthKey(d);if(!map.has(k))map.set(k,{date:new Date(d.getFullYear(),d.getMonth(),1),ingresos:0,egresos:0,vehiculos:0,salidas:0});map.get(k)[field]+=val};
+     parkSales.forEach(x=>{const d=saleDate(x);add(d,'ingresos',Number(x.total)||0)});
      incomesArr.forEach(x=>{const d=parseFPDate(x.dateTime);add(d,'ingresos',Number(x.amount)||0)});
      expensesArr.forEach(x=>{const d=parseFPDate(x.dateTime);add(d,'egresos',Number(x.amount)||0)});
      vehiculos.forEach(x=>{const d=parseFPDate(x.entradaFecha);add(d,'vehiculos',1)});
+     salidasV.forEach(x=>{const d=parseFPDate(x.salidaFecha);add(d,'salidas',1)});
      if(from&&to){
        const out=[];let d=new Date(from.getFullYear(),from.getMonth(),1);const last=new Date(to.getFullYear(),to.getMonth(),1);
-       while(d<=last){const k=monthKey(d),found=map.get(k);out.push(found?{...found,date:new Date(d)}:{date:new Date(d),ingresos:0,egresos:0,vehiculos:0});d.setMonth(d.getMonth()+1)}
+       while(d<=last){const k=monthKey(d),found=map.get(k);out.push(found?{...found,date:new Date(d)}:{date:new Date(d),ingresos:0,egresos:0,vehiculos:0,salidas:0});d.setMonth(d.getMonth()+1)}
        return out;
      }
      return Array.from(map.values()).sort((a,b)=>a.date-b.date);
    }
 
-   let chartData, labels, chartMode;
+   let chartData, labels, chartMode, tipLabels=null;
    const singleDay=selectedMode==='today' || rangeSpanDays===1;
+   const wantMonths=selectedMode==='year'||selectedMode==='all'||(selectedMode==='custom'&&rangeSpanDays!=null&&rangeSpanDays>400);
+   const wantWeeks=selectedMode==='custom'&&rangeSpanDays!=null&&rangeSpanDays>92;
    if(singleDay){
      const dayForOpen=from||new Date();
      chartData=buildHourly(dayOpenHour(dayForOpen)); labels=chartData.map(x=>x.label); chartMode='hora';
-   }else if(selectedMode==='year'||selectedMode==='all'){
+     tipLabels=chartData.map(x=>x.label+' – '+pad2(x.hour)+':59');
+   }else if(wantMonths){
      chartData=buildMonthly(); labels=chartData.map(x=>monthLabel(x.date)); chartMode='mes';
+   }else if(wantWeeks){
+     chartData=buildWeekly(); labels=chartData.map(x=>dayLabel(x.date)); chartMode='semana';
+     tipLabels=chartData.map(x=>{const r=weekRange(x.date);return 'Semana '+dayLabel(r.a)+' – '+dayLabel(r.b)+'/'+r.b.getFullYear()});
    }else{
      chartData=days; labels=chartData.map(x=>dayLabel(x.date)); chartMode='día';
    }
 
+   const modeWord=chartMode;
+   const t1=document.getElementById('reportDailyTitle'), t2=document.getElementById('reportVehiclesTitle');
+   if(t1) t1.textContent='Ingresos y egresos por '+modeWord;
+   if(t2) t2.textContent='Entradas y salidas de vehículos por '+modeWord;
    drawLineChart('reportDailyChart',labels,[
      {name:'Ingresos',color:'#33c17a',values:chartData.map(d=>d.ingresos)},
      {name:'Egresos',color:'#e0554a',values:chartData.map(d=>d.egresos)}
-   ],{formatY:v=>'$'+Math.round(v/1000)+'k'});
+   ],{tooltipLabels:tipLabels,formatY:fmtAxisMoney,formatTooltip:v=>money(v)});
    drawLineChart('reportVehiclesChart',labels,[
-     {name:'Vehículos',color:'#3aa0ff',values:chartData.map(d=>d.vehiculos)}
-   ],{formatY:v=>String(Math.round(v))});
+     {name:'Entradas',color:'#3aa0ff',values:chartData.map(d=>d.vehiculos)},
+     {name:'Salidas',color:'#ff9f00',values:chartData.map(d=>d.salidas)}
+   ],{tooltipLabels:tipLabels,integer:true,formatY:v=>String(Math.round(v)),formatTooltip:v=>String(Math.round(v))});
 
    const cfg=get(KEY.config,defaults.config)||{}, rp=cfg.receiptPrefix||'FA';
    const tb=document.querySelector('#reportClosingsTable tbody');
@@ -1140,8 +1187,9 @@ function initReports(){
 
    window.__fpReportSnapshot={
      periodLabel:periodLabel(from,to),
-     vehicles:vehiculos.length, ingresos, egresos, ganancia, cash, electronic, unknown,
-     days:days.map(d=>({label:dayLabel(d.date)+'/'+d.date.getFullYear(),ingresos:d.ingresos,egresos:d.egresos,vehiculos:d.vehiculos})),
+     vehicles:vehiculos.length, exits:salidasV.length, ingresos, egresos, ganancia, cash, electronic, unknown,
+     chartMode:modeWord,
+     series:chartData.map((d,i)=>({label:(chartMode==='día'||chartMode==='semana')?dayLabel(d.date)+'/'+d.date.getFullYear():labels[i],ingresos:d.ingresos,egresos:d.egresos,vehiculos:d.vehiculos,salidas:d.salidas})),
      closures:closuresArr
    };
  }
@@ -1151,7 +1199,6 @@ function initReports(){
    let min=null;
    const consider=v=>{const d=parseFPDate(v); if(d&&(!min||d<min)) min=d;};
    entriesFull().forEach(e=>{consider(e.entradaFecha); consider(e.salidaFecha);});
-   get('fp_monthly_payments',[]).forEach(e=>consider(e.dateTime));
    get('fp_expenses',[]).forEach(e=>consider(e.dateTime));
    get('fp_incomes',[]).forEach(e=>consider(e.dateTime));
    get('fp_cash_closings',[]).forEach(e=>consider(e.closedAt));
@@ -1187,7 +1234,8 @@ function exportReportExcel(){
  let html='<html><head><meta charset="utf-8"></head><body>';
  html+='<table border="1"><tr><td colspan="2"><b>Reporte Nexo.app'+(cfg.parkingName||cfg.razon_social?(' - '+esc(cfg.parkingName||cfg.razon_social)):'')+'</b></td></tr>';
  html+='<tr><td>Período</td><td>'+esc(d.periodLabel)+'</td></tr>';
- html+='<tr><td>Vehículos</td><td>'+d.vehicles+'</td></tr>';
+ html+='<tr><td>Vehículos que entraron</td><td>'+d.vehicles+'</td></tr>';
+ html+='<tr><td>Vehículos que salieron</td><td>'+(d.exits||0)+'</td></tr>';
  html+='<tr><td>Ingresos</td><td>'+money(d.ingresos)+'</td></tr>';
  html+='<tr><td>Egresos</td><td>'+money(d.egresos)+'</td></tr>';
  html+='<tr><td>Ganancia neta</td><td>'+money(d.ganancia)+'</td></tr>';
@@ -1195,8 +1243,8 @@ function exportReportExcel(){
  html+='<tr><td>Electrónico</td><td>'+money(d.electronic)+'</td></tr>';
  if(d.unknown>0) html+='<tr><td>Sin método</td><td>'+money(d.unknown)+'</td></tr>';
  html+='</table><br>';
- html+='<table border="1"><tr><th>Día</th><th>Ingresos</th><th>Egresos</th><th>Vehículos</th></tr>';
- d.days.forEach(x=>{html+='<tr><td>'+esc(x.label)+'</td><td>'+x.ingresos+'</td><td>'+x.egresos+'</td><td>'+x.vehiculos+'</td></tr>'});
+ html+='<table border="1"><tr><th>'+({hora:'Hora',mes:'Mes',semana:'Semana (inicio)'}[d.chartMode]||'Día')+'</th><th>Ingresos</th><th>Egresos</th><th>Entradas</th><th>Salidas</th></tr>';
+ d.series.forEach(x=>{html+='<tr><td>'+esc(x.label)+'</td><td>'+x.ingresos+'</td><td>'+x.egresos+'</td><td>'+x.vehiculos+'</td><td>'+(x.salidas||0)+'</td></tr>'});
  html+='</table><br>';
  html+='<table border="1"><tr><th>Apertura</th><th>Cierre</th><th>Usuario</th><th>Ventas</th><th>Egresos</th><th>Esperado</th><th>Contado</th><th>Diferencia</th><th>Recibo inicio</th><th>Recibo final</th><th>Estado</th></tr>';
  d.closures.forEach(c=>{html+='<tr><td>'+esc(fmt24(c.openedAt))+'</td><td>'+esc(fmt24(c.closedAt))+'</td><td>'+esc(c.closedBy)+'</td><td>'+(c.totalSales||0)+'</td><td>'+(c.totalEgresos||0)+'</td><td>'+(c.expectedCash||0)+'</td><td>'+(c.physicalCash||0)+'</td><td>'+(c.difference||0)+'</td><td>'+(c.receiptStart?rp+c.receiptStart:'')+'</td><td>'+(c.receiptEnd?rp+c.receiptEnd:'')+'</td><td>'+esc(c.status)+'</td></tr>'});
@@ -1210,6 +1258,8 @@ function printReport(){
  const d=window.__fpReportSnapshot; if(!d){fpAlert('Actualice el reporte antes de imprimir.');return}
  const cfg=get(KEY.config,defaults.config)||{};
  const dailyCanvas=document.getElementById('reportDailyChart'), vehCanvas=document.getElementById('reportVehiclesChart');
+ if(dailyCanvas&&dailyCanvas.__fpResetChart) dailyCanvas.__fpResetChart();
+ if(vehCanvas&&vehCanvas.__fpResetChart) vehCanvas.__fpResetChart();
  const dailyImg=dailyCanvas&&dailyCanvas.toDataURL?dailyCanvas.toDataURL('image/png'):'';
  const vehImg=vehCanvas&&vehCanvas.toDataURL?vehCanvas.toDataURL('image/png'):'';
  const rows=d.closures.slice().reverse().map(c=>`<tr><td>${esc(fmt24(c.openedAt))}</td><td>${esc(fmt24(c.closedAt))}</td><td>${esc(c.closedBy)}</td><td>${money(c.totalSales)}</td><td>${money(c.totalEgresos)}</td><td>${money(c.expectedCash)}</td><td>${money(c.physicalCash)}</td><td>${money(c.difference)}</td><td>${esc(c.status)}</td></tr>`).join('')||'<tr><td colspan="9">Sin cierres en este período.</td></tr>';
@@ -1231,13 +1281,13 @@ function printReport(){
  <h1>Reporte de operación — ${esc(cfg.parkingName||cfg.razon_social||'Nexo.app')}</h1>
  <div class="sub">Período: ${esc(d.periodLabel)} · Generado ${esc(fmt24(new Date()))}</div>
  <div class="grid">
-   <div class="box"><span>Vehículos</span><b>${d.vehicles}</b></div>
+   <div class="box"><span>Vehículos (entradas)</span><b>${d.vehicles}</b></div>
    <div class="box"><span>Ingresos</span><b>${money(d.ingresos)}</b></div>
    <div class="box"><span>Egresos</span><b>${money(d.egresos)}</b></div>
    <div class="box"><span>Ganancia neta</span><b>${money(d.ganancia)}</b></div>
  </div>
- ${dailyImg?`<h2>Ingresos y egresos por día</h2><img src="${dailyImg}">`:''}
- ${vehImg?`<h2>Vehículos por día</h2><img src="${vehImg}">`:''}
+ ${dailyImg?`<h2>Ingresos y egresos por ${esc(d.chartMode||'día')}</h2><img src="${dailyImg}">`:''}
+ ${vehImg?`<h2>Entradas y salidas de vehículos por ${esc(d.chartMode||'día')}</h2><img src="${vehImg}">`:''}
  <h2>Métodos de pago</h2>
  <table><tr><th>Efectivo</th><th>Electrónico</th>${d.unknown>0?'<th>Sin método</th>':''}</tr><tr><td>${money(d.cash)}</td><td>${money(d.electronic)}</td>${d.unknown>0?'<td>'+money(d.unknown)+'</td>':''}</tr></table>
  <h2>Cierres de caja</h2>
@@ -1495,7 +1545,7 @@ function printMonthlyReceipt(m,pay){
   const discountAmount=Number(pay.discountAmount||0);
   const discountRows=discountAmount>0?(row('Valor original',money(pay.originalValue||m.value||0),'arial')+row('Descuento','-'+money(discountAmount),'arial')):'';
   const businessBlock=showBusiness?`<div class="business"><b>${escP(business)}</b>${nit?`<span class="bizinfo">${escP(L('monthlyLabelNit','NIT.'))} ${escP(nit)}</span>`:''}${phone?`<span class="bizinfo">${escP(L('monthlyLabelPhone','TEL.'))} ${escP(phone)}</span>`:''}${address?`<span class="bizinfo">${escP(L('monthlyLabelAddress','DIR.'))} ${escP(address)}</span>`:''}</div><div class="divider"></div>`:'';
-  const mainRows=`<div class="receipt-type">MENSUALIDAD</div>${row(L('monthlyLabelReceipt','Recibo'),receipt,'arial')}${row(L('monthlyLabelClient','Cliente'),client,'arial')}${showDocument?row(L('monthlyLabelDocument','Documento'),document,'arial'):''}${row(L('monthlyLabelVehicle','Vehículo'),vehicle,'arial')}${row(L('monthlyLabelPlate','Placa'),plate,'arial')}${row(L('monthlyLabelPaymentDate','Fecha de pago'),fmt24(pay.dateTime),'arial')}${row(L('monthlyLabelStart','Inicio'),fmtDateEs(m.start||m.periodStart),'arial')}${row(L('monthlyLabelEnd','Vence'),fmtDateEs(m.end||m.periodEnd),'arial')}${discountRows}${row(L('monthlyLabelValue','Valor'),total,'total arial')}${row(L('monthlyLabelPaymentMethod','Forma de pago'),method,'arial')}`;
+  const mainRows=`<div class="receipt-type">MENSUALIDAD</div>${row(L('monthlyLabelReceipt','Recibo'),receipt,'arial')}${row(L('monthlyLabelClient','Cliente'),client,'arial')}${showDocument?row(L('monthlyLabelDocument','Teléfono'),document,'arial'):''}${row(L('monthlyLabelVehicle','Vehículo'),vehicle,'arial')}${row(L('monthlyLabelPlate','Placa'),plate,'arial')}${row(L('monthlyLabelPaymentDate','Fecha de pago'),fmt24(pay.dateTime),'arial')}${row(L('monthlyLabelStart','Inicio'),fmtDateEs(m.start||m.periodStart),'arial')}${row(L('monthlyLabelEnd','Vence'),fmtDateEs(m.end||m.periodEnd),'arial')}${discountRows}${row(L('monthlyLabelValue','Valor'),total,'total arial')}${row(L('monthlyLabelPaymentMethod','Forma de pago'),method,'arial')}`;
   const html=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${escP(receipt)}</title><style>@page{size:50mm auto;margin:0}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:50mm;max-width:50mm;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:"Times New Roman",Times,serif;font-size:10.5px;line-height:1.18;font-weight:600;text-rendering:geometricPrecision}.receipt{width:48mm;max-width:48mm;margin:0 auto;padding:1mm 1.5mm;font-family:"Times New Roman",Times,serif;font-size:10.5px;line-height:1.18;font-weight:600;overflow:visible}.arial span{font-family:Arial,Helvetica,sans-serif!important;font-size:calc(1em - 1px)!important;font-weight:normal!important}.business{line-height:1.3;text-align:center;margin:0 0 4px;font-size:10.5px;font-weight:600;overflow:visible;word-break:normal;overflow-wrap:break-word}.business b{display:block;font-size:14px;font-weight:700;letter-spacing:.3px;margin-bottom:3px}.bizinfo{display:block;font-size:12.5px;font-weight:700;line-height:1.25}.divider{width:100%;border:0;border-top:1px dashed #000;height:0;margin:5px 0}.divider.hours-divider{margin:0 0 3px}.main{line-height:1.3;text-align:left;font-size:14px;font-weight:600}.receipt-type{text-align:center;font-size:11.5px;font-weight:700;margin:0 0 4px}.row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;width:100%;margin:0 0 2px;gap:1px 4px}.row b{font-weight:600;white-space:nowrap;flex:0 0 auto}.row span{margin-left:auto;text-align:right;white-space:normal;overflow-wrap:break-word;word-break:break-word;flex:1 1 auto;min-width:0}.row.total{margin-top:3px;padding-top:3px;border-top:1px dashed #000;font-size:12.5px}.row.total b,.row.total span{font-weight:700}.hours{line-height:1.3;text-align:center;white-space:pre-line;padding:0;font-size:13px;font-weight:600}.hours-title{display:block;font-weight:700;font-size:13px;margin-bottom:3px}</style></head><body><div class="receipt">${businessBlock}<div class="main">${mainRows}</div><div class="divider hours-divider"></div><div class="hours"><div class="hours-title">HORARIOS DE ATENCIÓN</div>${escP(hours)}</div></div><script>window.onload=function(){window.print();setTimeout(function(){window.close()},300)};<\/script></body></html>`;
   const w=window.open('','_blank','width=420,height=700');
   if(!w){fpAlert('El navegador bloqueó la ventana de impresión. Permita ventanas emergentes para FacaParking.','error');return;}
@@ -1635,7 +1685,7 @@ function fpOpenPaymentModal(total,label,onConfirm){
 }
 function initMonthly(){
   let data=get('fp_monthly',[]), payments=get('fp_monthly_payments',[]), f=document.getElementById('monthlyForm'), tb=document.querySelector('#monthlyTable tbody'), search=document.getElementById('monthlySearch'), searchLegacy=document.getElementById('monthlySearchLegacy'), statusFilter=document.getElementById('monthlyStatusFilter'), payTb=document.querySelector('#monthlyPaymentsTable tbody'), payPager=document.getElementById('monthlyPaymentsPager');
-  let payPage=1, payPageSize=10;
+  let payPage=1, payPageSize=10, page=1, pageSize=10;
   const isAdmin=isAdminLevelRole((get(KEY.user,defaults.user)||{}).role);
   // El Empleado solo puede registrar pagos de mensualidades ya existentes:
   // no crea mensualidades nuevas ni usa la migración masiva por CSV.
@@ -1658,6 +1708,28 @@ function initMonthly(){
       return (!q2||hay.includes(q2))&&(!fromVal||day>=fromVal)&&(!toVal||day<=toVal)&&(!methodVal||pm===methodVal);
     });
   }
+  // Números telefónicos de la mensualidad: se pueden agregar varios. Se guardan en el campo
+  // histórico 'document' (oculto en el formulario) separados por coma, para no romper recibos,
+  // búsqueda ni importación.
+  const phonesBox=document.getElementById('monthlyPhones'), addPhoneBtn=document.getElementById('addMonthlyPhone');
+  function phonesSync(){if(!phonesBox||!f||!f.elements.document)return;f.elements.document.value=Array.from(phonesBox.querySelectorAll('input')).map(i=>i.value.trim()).filter(Boolean).join(', ');}
+  function phonesAddRow(v){
+    if(!phonesBox)return;
+    const row=document.createElement('div');row.style.cssText='display:flex;gap:4px;align-items:center;margin-bottom:4px';
+    const inp=document.createElement('input');inp.type='tel';inp.className='form-control';inp.placeholder='Ej. 3001234567';inp.value=v||'';inp.oninput=phonesSync;
+    const del=document.createElement('button');del.type='button';del.className='btn btn-sm btn-default';del.title='Quitar número';del.textContent='×';
+    del.onclick=()=>{if(phonesBox.children.length>1){row.remove();}else{inp.value='';}phonesSync();};
+    row.appendChild(inp);row.appendChild(del);phonesBox.appendChild(row);
+  }
+  function phonesLoad(){
+    if(!phonesBox||!f||!f.elements.document)return;
+    phonesBox.innerHTML='';
+    const list=String(f.elements.document.value||'').split(/[,;\n]+/).map(x=>x.trim()).filter(Boolean);
+    (list.length?list:['']).forEach(phonesAddRow);
+  }
+  if(addPhoneBtn)addPhoneBtn.onclick=()=>{phonesAddRow('');const ins=phonesBox.querySelectorAll('input');if(ins.length)ins[ins.length-1].focus();};
+  if(f){f.addEventListener('reset',()=>setTimeout(phonesLoad,0));}
+  phonesLoad();
   function toggleScheduleFields(){
     const sel=f.elements.schedule, box=document.getElementById('monthlyNightFields');
     if(box) box.style.display=(sel&&sel.value==='night')?'flex':'none';
@@ -1710,9 +1782,16 @@ function initMonthly(){
     const today=new Date(); today.setHours(0,0,0,0);
     return today<dayBefore;
   }
-  function render(){syncExpired();let q=(searchLegacy?.value||'').toLowerCase(),sf=statusFilter?.value||'';tb.innerHTML=data.map((x,i)=>({x,i})).filter(o=>(!sf||statusCategory(o.x)===sf)&&JSON.stringify(o.x).toLowerCase().includes(q)).map(o=>{let x=o.x,rd=monthlyRenewalDates(x),notExpired=monthlyGraceState(x)!=='expired',pendingPayment=String(x.paymentStatus||'').toLowerCase()==='pending',canPay=!x.pendingConfirmation&&!x.nextPeriod&&(((pendingPayment||x.installment)&&notExpired)||(rd&&rd.allowed)),canPrepay=monthlyCanPrepay(x),extra=monthlyExtraChargesTotal(x.id||('M'+o.i));return `<tr><td>${esc(x.document)}</td><td>${esc(x.name)}</td><td>${esc(String(x.plate||'').toUpperCase())}</td><td>${esc(x.vehicle)}</td><td>${esc(fmtDateEs(x.start))}</td><td>${esc(fmtDateEs(x.end))}${x.nextPeriod?'<br><small style="color:#1f7a4d">Adelanto pagado → vence '+esc(fmtDateEs(x.nextPeriod.end))+'</small>':''}</td><td>${money(x.value)}</td><td>${esc(monthlyScheduleDetail(x))}</td><td>${extra>0?money(extra):'—'}</td><td>${esc(statusOf(x))}</td><td>${isAdmin?`<button type=\"button\" class=\"btn btn-sm btn-warning editMonthly\" data-i=\"${o.i}\">Editar</button>`:''} ${isAdmin&&x.pendingConfirmation?`<button type=\"button\" class=\"btn btn-sm btn-success confirmMigration\" data-i=\"${o.i}\">Confirmar pago</button>`:''} ${canPay?`<button type=\"button\" class=\"btn btn-sm btn-primary renewMonthly\" data-i=\"${o.i}\">${x.installment?'Completar pago quincenal':'Pagar mensualidad'}</button>`:''} ${canPrepay?`<button type=\"button\" class=\"btn btn-sm btn-default payAdvance\" data-i=\"${o.i}\" title=\"Pagar el siguiente período por adelantado; no arranca hasta que venza el actual\">Pagar por adelantado</button>`:''} ${isAdmin?`<button type=\"button\" class=\"btn btn-sm btn-danger delMonthly\" data-i=\"${o.i}\">Eliminar</button>`:''}</td></tr>`}).join('')||'<tr><td colspan="11">No hay mensualidades registradas.</td></tr>';
+  function render(){syncExpired();let q=(searchLegacy?.value||'').toLowerCase(),sf=statusFilter?.value||'';let filteredMonthly=data.map((x,i)=>({x,i})).filter(o=>(!sf||statusCategory(o.x)===sf)&&JSON.stringify(o.x).toLowerCase().includes(q));let pagesM=Math.max(1,Math.ceil(filteredMonthly.length/pageSize));if(page>pagesM)page=pagesM;let pageItemsM=filteredMonthly.slice((page-1)*pageSize,page*pageSize);tb.innerHTML=pageItemsM.map(o=>{let x=o.x,rd=monthlyRenewalDates(x),notExpired=monthlyGraceState(x)!=='expired',pendingPayment=String(x.paymentStatus||'').toLowerCase()==='pending',canPay=!x.pendingConfirmation&&!x.nextPeriod&&(((pendingPayment||x.installment)&&notExpired)||(rd&&rd.allowed)),canPrepay=monthlyCanPrepay(x),extra=monthlyExtraChargesTotal(x.id||('M'+o.i));return `<tr><td>${String(x.document||'').split(/[,;\n]+/).map(t=>esc(t.trim())).filter(Boolean).join('<br>')}</td><td>${esc(x.name)}</td><td>${esc(String(x.plate||'').toUpperCase())}</td><td>${esc(x.vehicle)}</td><td>${esc(fmtDateEs(x.start))}</td><td>${esc(fmtDateEs(x.end))}${x.nextPeriod?'<br><small style="color:#1f7a4d">Adelanto pagado → vence '+esc(fmtDateEs(x.nextPeriod.end))+'</small>':''}</td><td>${money(x.value)}</td><td>${esc(monthlyScheduleDetail(x))}</td><td>${extra>0?money(extra):'—'}</td><td>${esc(statusOf(x))}</td><td>${isAdmin?`<button type=\"button\" class=\"btn btn-sm btn-warning editMonthly\" data-i=\"${o.i}\">Editar</button>`:''} ${isAdmin&&x.pendingConfirmation?`<button type=\"button\" class=\"btn btn-sm btn-success confirmMigration\" data-i=\"${o.i}\">Confirmar pago</button>`:''} ${canPay?`<button type=\"button\" class=\"btn btn-sm btn-primary renewMonthly\" data-i=\"${o.i}\">${x.installment?'Completar pago quincenal':'Pagar mensualidad'}</button>`:''} ${canPrepay?`<button type=\"button\" class=\"btn btn-sm btn-default payAdvance\" data-i=\"${o.i}\" title=\"Pagar el siguiente período por adelantado; no arranca hasta que venza el actual\">Pagar por adelantado</button>`:''} ${isAdmin?`<button type=\"button\" class=\"btn btn-sm btn-danger delMonthly\" data-i=\"${o.i}\">Eliminar</button>`:''}</td></tr>`}).join('')||'<tr><td colspan="11">No hay mensualidades registradas.</td></tr>';
+    const monthlyPagerEl=document.getElementById('monthlyPager');
+    if(monthlyPagerEl){
+      let numsM='';const maxBtnsM=5;let startM=Math.max(1,page-2),endM=Math.min(pagesM,startM+maxBtnsM-1);startM=Math.max(1,endM-maxBtnsM+1);
+      for(let n=startM;n<=endM;n++)numsM+=`<button type="button" class="${n===page?'active':''}" data-page="${n}">${n}</button>`;
+      monthlyPagerEl.innerHTML=`<button type="button" data-page="prev" ${page<=1?'disabled':''}>‹ Anterior</button>${numsM}<button type="button" data-page="next" ${page>=pagesM?'disabled':''}>Siguiente ›</button><span class="fp-page-count">Mostrando ${filteredMonthly.length?((page-1)*pageSize+1):0} a ${Math.min(page*pageSize,filteredMonthly.length)} de ${filteredMonthly.length} mensualidades</span>`;
+      monthlyPagerEl.querySelectorAll('button').forEach(b=>b.onclick=()=>{const v=b.dataset.page;if(v==='prev'&&page>1)page--;else if(v==='next'&&page<pagesM)page++;else if(!isNaN(+v))page=+v;render();});
+    }
     tb.querySelectorAll('.confirmMigration').forEach(b=>b.onclick=()=>{if(!isAdmin){fpAlert('Solo el Administrador puede confirmar el pago de una mensualidad migrada.','error');return;}let m=data[+b.dataset.i];fpConfirm('¿Confirmar que la mensualidad de '+String(m.plate||'').toUpperCase()+' ya fue pagada por fuera del sistema?\nQuedará activa hasta '+fmtDateEs(m.end)+'.',()=>{m.pendingConfirmation=false;m.active=true;m.confirmedAt=new Date().toISOString();m.confirmedBy=(get(KEY.user,defaults.user)||{}).name||'Usuario';set('fp_monthly',data);render();fpAlert('Pago confirmado. La mensualidad de '+String(m.plate||'').toUpperCase()+' queda activa.');},{okText:'Confirmar'});});
-    tb.querySelectorAll('.editMonthly').forEach(b=>b.onclick=()=>{if(!isAdmin){fpAlert('Solo el Administrador puede modificar mensualidades.','error');return;}let m=data[+b.dataset.i];['document','name','plate','vehicle','value','start','end'].forEach(k=>{if(f.elements[k])f.elements[k].value=m[k]??''});if(f.elements.schedule)f.elements.schedule.value=String(m.schedule||'day').toLowerCase()==='night'?'night':'day';if(f.elements.nightEntryLimit)f.elements.nightEntryLimit.value=m.nightEntryLimit||'';if(f.elements.nightExitLimit)f.elements.nightExitLimit.value=m.nightExitLimit||'';toggleScheduleFields();if(f.elements.active)f.elements.active.checked=m.active!==false;if(f.elements.biweekly)f.elements.biweekly.checked=!!m.biweekly;f.dataset.i=b.dataset.i;window.scrollTo({top:f.getBoundingClientRect().top+window.scrollY-80,behavior:'smooth'});});
+    tb.querySelectorAll('.editMonthly').forEach(b=>b.onclick=()=>{if(!isAdmin){fpAlert('Solo el Administrador puede modificar mensualidades.','error');return;}let m=data[+b.dataset.i];['document','name','plate','vehicle','value','start','end'].forEach(k=>{if(f.elements[k])f.elements[k].value=m[k]??''});if(f.elements.schedule)f.elements.schedule.value=String(m.schedule||'day').toLowerCase()==='night'?'night':'day';if(f.elements.nightEntryLimit)f.elements.nightEntryLimit.value=m.nightEntryLimit||'';if(f.elements.nightExitLimit)f.elements.nightExitLimit.value=m.nightExitLimit||'';toggleScheduleFields();phonesLoad();if(f.elements.active)f.elements.active.checked=m.active!==false;if(f.elements.biweekly)f.elements.biweekly.checked=!!m.biweekly;f.dataset.i=b.dataset.i;window.scrollTo({top:f.getBoundingClientRect().top+window.scrollY-80,behavior:'smooth'});});
     tb.querySelectorAll('.delMonthly').forEach(b=>b.onclick=()=>{if(!isAdmin){fpAlert('Solo el Administrador puede eliminar mensualidades.','error');return;}fpConfirm('¿Eliminar esta mensualidad?',()=>{data.splice(+b.dataset.i,1);set('fp_monthly',data);render()},{danger:true,okText:'Eliminar'});});
     tb.querySelectorAll('.renewMonthly').forEach(b=>b.onclick=()=>payMonthly(+b.dataset.i));
     tb.querySelectorAll('.payAdvance').forEach(b=>b.onclick=()=>payMonthlyAdvance(+b.dataset.i));
@@ -1819,13 +1898,13 @@ function initMonthly(){
     });
   }
   render();search.oninput=()=>{payPage=1;render()};
-  if(searchLegacy) searchLegacy.oninput=()=>render();
+  if(searchLegacy) searchLegacy.oninput=()=>{page=1;render()};
   if(f.elements.start && f.elements.end){
     f.elements.start.addEventListener('change',()=>{
       f.elements.end.value=f.elements.start.value?fmtDateOnly(addCalendarMonthsDate(f.elements.start.value,1)):'';
     });
   }
-  ['monthlyFrom','monthlyTo','monthlyPaymentFilter','monthlyStatusFilter'].forEach(id=>{const el=document.getElementById(id);if(el)el.onchange=()=>{payPage=1;render()}});
+  ['monthlyFrom','monthlyTo','monthlyPaymentFilter','monthlyStatusFilter'].forEach(id=>{const el=document.getElementById(id);if(el)el.onchange=()=>{payPage=1;page=1;render()}});
   f.onsubmit=e=>{
     e.preventDefault();
     const editing=f.dataset.i!==undefined;
@@ -1928,7 +2007,7 @@ function initMonthly(){
         if(!rows.length){fpAlert('El archivo está vacío.','error');previewBox.style.display='none';return;}
         const header=rows[0].map(normHeader);
         const col=(name)=>header.indexOf(name);
-        const idx={documento:col('documento'),nombre:col('nombre'),placa:col('placa'),vehiculo:col('vehiculo'),valor:col('valor'),vence:col('fecha_vencimiento'),inicio:col('fecha_inicio'),horario:col('horario'),horaEntrada:col('hora_entrada')>=0?col('hora_entrada'):col('hora_entrada_limite'),horaSalida:col('hora_salida')>=0?col('hora_salida'):col('hora_salida_limite')};
+        const idx={documento:col('documento')>=0?col('documento'):col('telefono'),nombre:col('nombre'),placa:col('placa'),vehiculo:col('vehiculo'),valor:col('valor'),vence:col('fecha_vencimiento'),inicio:col('fecha_inicio'),horario:col('horario'),horaEntrada:col('hora_entrada')>=0?col('hora_entrada'):col('hora_entrada_limite'),horaSalida:col('hora_salida')>=0?col('hora_salida'):col('hora_salida_limite')};
         if(idx.nombre<0||idx.placa<0||idx.valor<0||idx.vence<0){fpAlert('El archivo debe tener al menos las columnas: nombre, placa, valor, fecha_vencimiento.','error');previewBox.style.display='none';return;}
         const seenPlates=new Set(data.filter(m=>m.active||m.pendingConfirmation).map(m=>String(m.plate||'').toUpperCase())), csvPlates=new Set(), valid=[], errors=[];
         rows.slice(1).forEach((r,i)=>{
@@ -2039,7 +2118,7 @@ function initPending(){
     let rows=groupPending(flat).sort((a,b)=>(b.lastDate||0)-(a.lastDate||0));
     const pages=Math.max(1,Math.ceil(rows.length/pageSize)); if(page>pages)page=pages;
     const pageRows=rows.slice((page-1)*pageSize,page*pageSize);
-    tb.innerHTML=pageRows.map(x=>`<tr><td>${esc(x.receiptPrefix||'FA')}${esc(x.receiptNumber||'')}${x.items.length>1?' (+'+(x.items.length-1)+')':''}</td><td>${esc(String(x.plate||'').toUpperCase())}</td><td>${esc(x.clientName||'—')}</td><td>${esc(fmt24(x.lastDate))}${x.items.length>1?'<br><small style="color:#697382">'+x.items.length+' salidas pendientes</small>':''}</td><td>${money(x.amount)}</td><td>${x.monthlyEnd?esc(fmtDateEs(x.monthlyEnd)):'—'}</td><td><button type="button" class="btn btn-sm btn-primary confirmPending" data-key="${esc(x.key)}">Confirmar pago</button> <button type="button" class="btn btn-sm btn-default viewHistory" data-plate="${esc(String(x.plate||'').toUpperCase())}">Historial</button></td></tr>`).join('')||'<tr><td colspan="7">No hay cobros pendientes de confirmar.</td></tr>';
+    tb.innerHTML=pageRows.map(x=>`<tr><td>${esc(x.receiptPrefix||'FA')}${esc(x.receiptNumber||'')}${x.items.length>1?' (+'+(x.items.length-1)+')':''}</td><td>${esc(String(x.plate||'').toUpperCase())}</td><td>${esc(x.clientName||'—')}</td><td>${esc(fmt24(x.lastDate))}${x.items.length>1?'<br><small style="color:#697382">'+x.items.length+' salidas pendientes</small>':''}</td><td>${money(x.amount)}</td><td>${x.monthlyEnd?esc(fmtDateEs(x.monthlyEnd)):'—'}</td><td><button type="button" class="btn btn-sm btn-primary confirmPending" data-key="${esc(x.key)}" title="Confirmar pago" aria-label="Confirmar pago"><i class="fa fa-check"></i></button> <button type="button" class="btn btn-sm btn-default viewHistory" data-plate="${esc(String(x.plate||'').toUpperCase())}" title="Historial" aria-label="Historial"><i class="fa fa-history"></i></button></td></tr>`).join('')||'<tr><td colspan="7">No hay cobros pendientes de confirmar.</td></tr>';
     totalAmountEl.textContent=money(flat.reduce((a,x)=>a+(+x.amount||0),0));
     totalCountEl.textContent=String(rows.length);
     tb.querySelectorAll('.confirmPending').forEach(b=>b.onclick=()=>{
@@ -2054,19 +2133,21 @@ function initPending(){
       pager.querySelectorAll('button').forEach(b=>b.onclick=()=>{const v=b.dataset.page;if(v==='prev'&&page>1)page--;else if(v==='next'&&page<pages)page++;else if(!isNaN(+v))page=+v;render()});
     }
   }
-  // Historial de una placa: TODOS sus registros (entrada, salida y valor a cobrar/cobrado),
-  // vengan de fp_entries o del archivo fp_entries_archive (entriesFull() une ambos).
+  // Historial de una placa: solo las entradas/salidas que SIGUEN pendientes de
+  // confirmar (pendingMonthlyConfirmation:true), no todo el historial de la placa.
+  // Vengan de fp_entries o del archivo fp_entries_archive (entriesFull() une ambos).
   function showPlateHistory(plate){
     const wanted=String(plate||'').trim().toUpperCase();
     const overlay=document.getElementById('historyOverlay'), tbody=document.querySelector('#historyTable tbody'), label=document.getElementById('historyPlateLabel');
     if(!overlay||!tbody) return;
     if(label) label.textContent=wanted;
-    const rows=entriesFull().filter(e=>String(e.placa||'').trim().toUpperCase()===wanted)
+    const rows=entriesFull().filter(e=>String(e.placa||'').trim().toUpperCase()===wanted && e.pendingMonthlyConfirmation===true)
       .sort((a,b)=>(parseFPDate(b.entradaFecha)||0)-(parseFPDate(a.entradaFecha)||0));
     tbody.innerHTML=rows.map(e=>{
       const entrada=parseFPDate(e.entradaFecha), salida=parseFPDate(e.salidaFecha);
-      return `<tr><td>${entrada?esc(fmt24(entrada)):'—'}</td><td>${salida?esc(fmt24(salida)):'—'}</td><td>${e.total!=null?money(e.total):'—'}</td></tr>`;
-    }).join('')||'<tr><td colspan="3">Esta placa no tiene registros.</td></tr>';
+      const recibo=(e.reciboPrefijo||'FA')+String(e.reciboNumero||'');
+      return `<tr><td>${esc(recibo)}</td><td>${entrada?esc(fmt24(entrada)):'—'}</td><td>${salida?esc(fmt24(salida)):'—'}</td><td>${e.total!=null?money(e.total):'—'}</td></tr>`;
+    }).join('')||'<tr><td colspan="4">Esta placa no tiene salidas pendientes de confirmar.</td></tr>';
     overlay.style.display='flex';
   }
   const historyOverlay=document.getElementById('historyOverlay');
@@ -2176,10 +2257,10 @@ function initCash(){
    const totalDiscounts=sales.reduce((a,x)=>a+(+x.discountAmount||0),0);
    const expected=salesCash+ig-eg;
    const bIn=sumAmt(baseInList(reg)), bOut=sumAmt(baseOutList(reg)), baseTotal=(+reg.initialCash||0)+bIn-bOut;
-   ['cashBase','cashSales','cashElectronic','cashIncomes','cashExpenses','cashExpected'].forEach((id,i)=>{let el=document.getElementById(id); if(el)el.textContent=money([baseTotal,totalSales,salesElectronic,ig,eg,expected][i])});
+   ['cashBase','cashSales','cashElectronic','cashExpenses','cashExpected'].forEach((id,i)=>{let el=document.getElementById(id); if(el)el.textContent=money([baseTotal,totalSales+ig,salesElectronic,eg,expected][i])});
    const bd=document.getElementById('cashBaseDetail');
    if(bd){ if(bIn||bOut){bd.style.display='block';bd.textContent='Inicial '+money(reg.initialCash||0)+(bIn?' · + '+money(bIn):'')+(bOut?' · − '+money(bOut):'');}else{bd.style.display='none';bd.textContent='';} }
-   let discEl=document.getElementById('cashDiscounts');if(discEl)discEl.textContent=money(totalDiscounts);
+   let discEl=document.getElementById('cashDiscounts');if(discEl)discEl.textContent=money(totalDiscounts);let incEl=document.getElementById('cashIncomes');if(incEl)incEl.textContent=money(ig);
    let ct=document.getElementById('cashCount');if(ct)ct.textContent=sales.length;
    const cfg0=get(KEY.config,defaults.config)||{};const rp=cfg0.receiptPrefix||'FA';
    let receiptNums=ps.map(x=>parseInt(x.reciboNumero||x.receiptNumber,10)).filter(n=>isFinite(n)).sort((a,b)=>a-b);
@@ -2188,7 +2269,7 @@ function initCash(){
    const pages=Math.max(1,Math.ceil(sales.length/pageSize)); if(page>pages)page=pages;
    const rows=sales.slice().sort((a,b)=>(parseFPDate(b.salidaFecha)||0)-(parseFPDate(a.salidaFecha)||0)).slice((page-1)*pageSize,page*pageSize);
    let tb=document.querySelector('#cashSalesTable tbody');
-   if(tb)tb.innerHTML=rows.map(e=>`<tr><td>${esc(e.reciboPrefijo||'FA')}${esc(e.reciboNumero||'')}</td><td>${esc(e.placa||e.plate||'')}</td><td>${esc(e.salidaFecha||e.dateTime||'')}</td><td>${esc(paymentLabel(e))}</td><td${(+e.discountAmount>0)?' style="color:#e53935;font-weight:700" title="Venta con descuento aplicado"':''}>${money(e.total||0)}</td><td>${money(e.cashAmount||0)}</td><td>${money(e.nequiAmount||0)}</td></tr>`).join('')||'<tr><td colspan="7">No hay ventas en esta caja.</td></tr>';
+   if(tb)tb.innerHTML=rows.map(e=>`<tr${(+e.discountAmount>0)?' class="fp-disc-row" title="Venta con descuento aplicado"':''}><td>${esc(e.reciboPrefijo||'FA')}${esc(e.reciboNumero||'')}</td><td>${esc(e.placa||e.plate||'')}</td><td>${esc(e.salidaFecha||e.dateTime||'')}</td><td>${esc(paymentLabel(e))}</td><td>${money(e.total||0)}</td><td>${money(e.cashAmount||0)}</td><td>${money(e.nequiAmount||0)}</td></tr>`).join('')||'<tr><td colspan="7">No hay ventas en esta caja.</td></tr>';
    let pager=document.getElementById('cashSalesPager');
    if(!pager){
      const table=document.getElementById('cashSalesTable');
@@ -2223,7 +2304,7 @@ function buildCashCloseHtml(d){
   const fmt=x=>fmt24(x);
   const statusLabel={balanced:'Cuadrada',surplus:'Sobrante',deficit:'Faltante'}[d.status]||(d.status?esc(d.status):'—');
   const allSales=(d.ps||[]).slice().sort((a,b)=>(parseFPDate(a.salidaFecha)||0)-(parseFPDate(b.salidaFecha)||0));
-  const rows=allSales.map(x=>`<tr><td>${esc(x.reciboPrefijo||x.receiptPrefix||'FA')}${esc(x.reciboNumero||x.receiptNumber||'')}</td><td>${esc(x.placa||x.plate||'')}</td><td>${esc(paymentLabel(x))}</td><td>${money(x.total||0)}</td><td>${money(x.cashAmount||0)}</td><td>${money(x.nequiAmount||0)}</td><td>${esc(fmt(x.salidaFecha))}</td></tr>`).join('')||'<tr><td colspan="7">Sin ventas de parqueadero.</td></tr>';
+  const rows=allSales.map(x=>`<tr${(+x.discountAmount>0)?' class="disc"':''}><td>${esc(x.reciboPrefijo||x.receiptPrefix||'FA')}${esc(x.reciboNumero||x.receiptNumber||'')}</td><td>${esc(x.placa||x.plate||'')}</td><td>${esc(paymentLabel(x))}</td><td>${money(x.total||0)}</td><td>${money(x.cashAmount||0)}</td><td>${money(x.nequiAmount||0)}</td><td>${money(x.discountAmount||0)}</td></tr>`).join('')||'<tr><td colspan="7">Sin ventas de parqueadero.</td></tr>';
   const ex=d.ex.map(x=>`<tr><td>${esc(fmt(x.dateTime))}</td><td>${esc(x.concept)||'—'}</td><td>${money(x.amount||0)}</td><td>${esc(x.user||'')}</td></tr>`).join('')||'<tr><td colspan="4">Sin egresos.</td></tr>';
   const bAdd=+d.baseAdded||0,bRem=+d.baseRemoved||0;
   const baseShown=d.baseFinal!=null?d.baseFinal:(d.reg.initialCash||0);
@@ -2231,7 +2312,7 @@ function buildCashCloseHtml(d){
   const baseList=[].concat((d.bin||[]).map(x=>({x,s:'+ '})),(d.bout||[]).map(x=>({x,s:'− '}))).sort((a,b)=>(parseFPDate(a.x.dateTime)||0)-(parseFPDate(b.x.dateTime)||0));
   const baseSection=baseList.length?`<h2 style="color:#e67e00;border-bottom-color:#f5b26b">Movimientos de base del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${baseList.map(r=>`<tr style="background:#fff3e0"><td>${esc(fmt(r.x.dateTime))}</td><td>${esc(r.x.concept)||'—'}</td><td>${r.s}${money(r.x.amount||0)}</td><td>${esc(r.x.user||'')}</td></tr>`).join('')}</tbody></table>`:'';
   const incRows=(d.inc||[]).map(x=>`<tr><td>${esc(fmt(x.dateTime))}</td><td>${esc(x.concept)||'—'}</td><td>${money(x.amount||0)}</td><td>${esc(x.user||'')}</td></tr>`).join('')||'<tr><td colspan="4">Sin ingresos manuales.</td></tr>';
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Cierre de caja</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#222}h1{text-align:center;font-size:22px;margin:0 0 8px}h2{font-size:16px;margin:20px 0 8px;border-bottom:1px solid #ccc;padding-bottom:5px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.box{border:1px solid #ddd;padding:10px;border-radius:6px}.box b{display:block;font-size:15px;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background:#f3f3f3}.right{text-align:right}.note{margin-top:18px;font-size:12px;color:#666}.obs{margin-top:14px;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:12px;background:#fafafa}.obs b{display:block;margin-bottom:4px;font-size:12px}</style></head><body><h1>RESUMEN DE CIERRE DE CAJA</h1><div class="note">Apertura: ${esc(fmt(d.reg.openedAt))} · Cierre: ${esc(fmt(d.closedAt))} · Abrió: ${esc(d.reg.openedBy||'')} · Cerró: ${esc(d.closedBy||'')} · Estado: ${statusLabel}</div><div class="grid"><div class="box">Base del día<b>${money(baseShown)}</b>${baseNote}</div><div class="box">Ventas (parqueadero)<b>${money(d.totalSales!=null?d.totalSales:(d.totalPark||0))}</b></div><div class="box">Pagos electrónicos<b>${money(d.salesElectronic)}</b></div><div class="box">Ingresos manuales<b>${money(d.ig||0)}</b></div><div class="box">Egresos<b>${money(d.eg)}</b></div><div class="box">Efectivo esperado<b>${money(d.expected)}</b></div><div class="box">Efectivo físico<b>${money(d.physical)}</b></div><div class="box">Diferencia<b>${money(d.diff)}</b></div><div class="box">Recibo inicial<b>${d.receiptStart?d.receiptPrefix+d.receiptStart:'N/A'}</b></div><div class="box">Recibo final<b>${d.receiptEnd?d.receiptPrefix+d.receiptEnd:'N/A'}</b></div><div class="box">Recibos emitidos<b>${d.receiptCount!=null?d.receiptCount:d.ps.length}</b></div></div>${d.observation?('<div class="obs"><b>Observación del cierre</b>'+esc(d.observation)+'</div>'):''}<h2>Ingresos manuales del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${incRows}</tbody></table><h2>Egresos del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${ex}</tbody></table>${baseSection}<h2>Ventas de parqueadero del día</h2><table><thead><tr><th>Recibo</th><th>Placa</th><th>Forma de pago</th><th>Total</th><th>Efectivo</th><th>Nequi</th><th>Fecha</th></tr></thead><tbody>${rows}</tbody></table><p class="note">Este resumen incluye únicamente las ventas de parqueadero (entradas/salidas), los ingresos manuales y los egresos de esta caja. Los pagos de mensualidades no se incluyen aquí; tienen su propio reporte en Mensualidades ("Reporte de mensualidades").</p></body></html>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Cierre de caja</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#222}h1{text-align:center;font-size:22px;margin:0 0 8px}h2{font-size:16px;margin:20px 0 8px;border-bottom:1px solid #ccc;padding-bottom:5px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.box{border:1px solid #ddd;padding:10px;border-radius:6px}.box b{display:block;font-size:15px;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background:#f3f3f3}.right{text-align:right}.note{margin-top:18px;font-size:12px;color:#666}.obs{margin-top:14px;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:12px;background:#fafafa}tr.disc td{background:#ffebee;color:#c62828;font-weight:700}.obs b{display:block;margin-bottom:4px;font-size:12px}</style></head><body><h1>RESUMEN DE CIERRE DE CAJA</h1><div class="note">Apertura: ${esc(fmt(d.reg.openedAt))} · Cierre: ${esc(fmt(d.closedAt))} · Abrió: ${esc(d.reg.openedBy||'')} · Cerró: ${esc(d.closedBy||'')} · Estado: ${statusLabel}</div><div class="grid"><div class="box">Base del día<b>${money(baseShown)}</b>${baseNote}</div><div class="box">Ventas<b>${money((d.totalSales!=null?d.totalSales:(d.totalPark||0))+(+d.ig||0))}</b></div><div class="box">Ingresos manuales<b>${money(d.ig||0)}</b></div><div class="box">Pagos electrónicos<b>${money(d.salesElectronic)}</b></div><div class="box">Egresos<b>${money(d.eg)}</b></div><div class="box">Efectivo esperado<b>${money(d.expected)}</b></div><div class="box">Efectivo físico<b>${money(d.physical)}</b></div><div class="box">Diferencia<b>${money(d.diff)}</b></div><div class="box">Recibo inicial<b>${d.receiptStart?d.receiptPrefix+d.receiptStart:'N/A'}</b></div><div class="box">Recibo final<b>${d.receiptEnd?d.receiptPrefix+d.receiptEnd:'N/A'}</b></div><div class="box">Recibos emitidos<b>${d.receiptCount!=null?d.receiptCount:d.ps.length}</b></div></div>${d.observation?('<div class="obs"><b>Observación del cierre</b>'+esc(d.observation)+'</div>'):''}<h2>Ingresos manuales del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${incRows}</tbody></table><h2>Egresos del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${ex}</tbody></table>${baseSection}<h2>Ventas de parqueadero del día</h2><table><thead><tr><th>Recibo</th><th>Placa</th><th>Forma de pago</th><th>Total</th><th>Efectivo</th><th>Nequi</th><th>Descuento</th></tr></thead><tbody>${rows}</tbody></table><p class="note">El total de "Ventas" incluye las ventas de parqueadero (entradas/salidas) más los ingresos manuales de esta caja (ver detalle abajo). Los egresos se muestran aparte. Los pagos de mensualidades no se incluyen aquí; tienen su propio reporte en Mensualidades ("Reporte de mensualidades").</p></body></html>`;
 }
 function showCashCloseSummary(d){
   try{
@@ -2270,12 +2351,18 @@ function initExpenses(){
   base_out:{key:'fp_base_out',prefix:'BO',label:'Base −',noun:'movimiento de base',cls:'fp-mov-base',sign:'− ',saved:'Dinero quitado de la base.',base:true}
  };
  const tb=document.querySelector('#movementsTable tbody'),overlay=document.getElementById('movementOverlay');
+ const pager=document.getElementById('movementsPager');
  if(!tb||!overlay)return;
  const $=id=>document.getElementById(id);
  const conceptEl=$('movementConcept'),amountEl=$('movementAmount'),msg=$('movementMsg'),titleEl=$('movementTitle'),saveBtn=$('movementSaveBtn'),baseInfo=$('movementBaseInfo');
  const typeBtns=overlay.querySelectorAll('.fp-mov-toggle button');
- let mode='new',editing=null,curType='';
+ let mode='new',editing=null,curType='',page=1;const pageSize=10;
  const ts=x=>{const t=new Date(x&&x.dateTime).getTime();return isNaN(t)?0:t};
+ // Un movimiento solo se puede editar el mismo día calendario (hora local) en que se creó.
+ function sameDayAsNow(dateTime){
+  const d=new Date(dateTime),n=new Date();
+  return !isNaN(d.getTime())&&d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate();
+ }
  /* Base de la caja abierta = base inicial + "Base +" − "Base −" de esa caja. */
  const sumAmt=a=>a.reduce((s,x)=>s+(+(x&&x.amount)||0),0);
  function baseValue(reg,ins,outs){const mine=x=>x&&x.registerId===reg.id;return (+reg.initialCash||0)+sumAmt(ins.filter(mine))-sumAmt(outs.filter(mine))}
@@ -2301,9 +2388,23 @@ function initExpenses(){
   const rows=[];
   Object.keys(TYPES).forEach(t=>{const a=get(TYPES[t].key,[]);if(Array.isArray(a))a.forEach((x,i)=>{if(x)rows.push({t,x,i})})});
   rows.sort((a,b)=>ts(b.x)-ts(a.x)||b.i-a.i);
-  tb.innerHTML=rows.map(r=>{const T=TYPES[r.t],x=r.x,nn=T.noun;return `<tr class="${T.cls}"><td>${fmt24(x.dateTime)}</td><td><span class="fp-mov-badge">${T.label}</span></td><td>${esc(x.concept)||'—'}</td><td class="fp-mov-amount">${T.sign}${money(x.amount)}</td><td>${esc(x.user)}</td><td>${x.registerId?'Asociado':'Sin caja'}</td><td><button type="button" class="btn btn-sm editMovement" data-type="${r.t}" data-id="${esc(x.id)}" title="Editar ${nn}" aria-label="Editar ${nn}"><i class="fa fa-pencil"></i></button><button type="button" class="btn btn-sm btn-danger delMovement" data-type="${r.t}" data-id="${esc(x.id)}" title="Eliminar ${nn}" aria-label="Eliminar ${nn}"><i class="fa fa-trash"></i></button></td></tr>`}).join('')||'<tr><td colspan="7">No hay movimientos registrados.</td></tr>';
+  const pages=Math.max(1,Math.ceil(rows.length/pageSize));if(page>pages)page=pages;
+  const pageRows=rows.slice((page-1)*pageSize,page*pageSize);
+  tb.innerHTML=pageRows.map(r=>{
+   const T=TYPES[r.t],x=r.x,nn=T.noun,editable=sameDayAsNow(x.dateTime);
+   const editBtn=editable
+    ?`<button type="button" class="btn btn-sm editMovement" data-type="${r.t}" data-id="${esc(x.id)}" title="Editar ${nn}" aria-label="Editar ${nn}"><i class="fa fa-pencil"></i></button>`
+    :`<button type="button" class="btn btn-sm editMovement" disabled title="Solo se puede editar el mismo día en que se registró" aria-label="Edición no disponible"><i class="fa fa-pencil"></i></button>`;
+   return `<tr class="${T.cls}"><td>${fmt24(x.dateTime)}</td><td><span class="fp-mov-badge">${T.label}</span></td><td>${esc(x.concept)||'—'}</td><td class="fp-mov-amount">${T.sign}${money(x.amount)}</td><td>${esc(x.user)}</td><td>${x.registerId?'Asociado':'Sin caja'}</td><td>${editBtn}<button type="button" class="btn btn-sm btn-danger delMovement" data-type="${r.t}" data-id="${esc(x.id)}" title="Eliminar ${nn}" aria-label="Eliminar ${nn}"><i class="fa fa-trash"></i></button></td></tr>`
+  }).join('')||'<tr><td colspan="7">No hay movimientos registrados.</td></tr>';
   tb.querySelectorAll('.editMovement').forEach(b=>b.onclick=()=>openModal('edit',b.dataset.type,b.dataset.id));
   tb.querySelectorAll('.delMovement').forEach(b=>b.onclick=()=>del(b.dataset.type,b.dataset.id));
+  if(pager){
+   const maxBtns=5;let start=Math.max(1,page-2),end=Math.min(pages,start+maxBtns-1);start=Math.max(1,end-maxBtns+1);
+   let nums='';for(let n=start;n<=end;n++)nums+=`<button type="button" class="${n===page?'active':''}" data-page="${n}">${n}</button>`;
+   pager.innerHTML=`<button type="button" data-page="prev" ${page<=1?'disabled':''}>‹ Anterior</button>${nums}<button type="button" data-page="next" ${page>=pages?'disabled':''}>Siguiente ›</button><span class="fp-page-count">Mostrando ${rows.length?((page-1)*pageSize+1):0} a ${Math.min(page*pageSize,rows.length)} de ${rows.length} movimientos</span>`;
+   pager.querySelectorAll('button').forEach(b=>b.onclick=()=>{const v=b.dataset.page;if(v==='prev'&&page>1)page--;else if(v==='next'&&page<pages)page++;else if(!isNaN(+v))page=+v;render()});
+  }
   renderBaseInfo();
  }
  function del(t,id){
@@ -2327,6 +2428,7 @@ function initExpenses(){
   if(m==='edit'){
    const x=get(TYPES[t].key,[]).find(i=>i&&String(i.id)===String(id));
    if(!x){fpAlert('No fue posible encontrar el movimiento.');return}
+   if(!sameDayAsNow(x.dateTime)){fpAlert('Este movimiento ya no se puede editar: solo se permite el mismo día en que se registró.','error');return}
    if(TYPES[t].base){
     const reg=get('fp_cash_register',null);
     if(!reg||x.registerId!==reg.id){fpAlert('Este movimiento de base pertenece a una caja ya cerrada y no se puede editar.','error');return}
@@ -2357,6 +2459,7 @@ function initExpenses(){
   }
   const from=TYPES[editing.type],src=get(from.key,[]),idx=src.findIndex(i=>i&&String(i.id)===String(editing.id));
   if(idx<0){close();render();return}
+  if(!sameDayAsNow(src[idx].dateTime)){fail('Este movimiento ya no se puede editar: solo se permite el mismo día en que se registró.');return}
   if(from.base||T.base){
    // Cualquier cambio que toque la base solo se permite dentro de la caja abierta a la que pertenece
    // el movimiento, y sin dejar la base en negativo.
@@ -2444,7 +2547,7 @@ function buildReceiptPreviewHTML(type,rf,pf){
     let h=businessBlock('monthly','monthlyShowBusiness');
     h+=row(true,val('monthlyLabelReceipt')||'Consecutivo','FM1',false,true);
     h+=row(true,val('monthlyLabelClient')||'Cliente','Juan Pérez',false,true);
-    h+=row(val('monthlyShowDocument'),val('monthlyLabelDocument')||'Documento','1234567890',false,true);
+    h+=row(val('monthlyShowDocument'),val('monthlyLabelDocument')||'Teléfono','3001234567',false,true);
     h+=row(true,val('monthlyLabelVehicle')||'Vehículo','Mazda 3',false,true);
     h+=row(true,val('monthlyLabelPlate')||'Placa','ABC123',false,true);
     h+=row(true,val('monthlyLabelPaymentDate')||'Fecha de pago','12-09-2026 09:00',false,true);
@@ -2472,7 +2575,7 @@ function wireReceiptPreview(rf,pf){
 }
 function initConfig(){ensure();const s=get(KEY.services,defaults.services),f=document.getElementById('ratesForm'),rf=document.getElementById('receiptConfigForm'),pf=document.getElementById('parkingConfigForm');function fill(){let by=(id)=>s.find(x=>String(x.id)===id)||{};let a=by('5'),m=by('6'),b=by('7');[['car',a],['moto',m],['bike',b]].forEach(([p,x])=>{f.elements[p+'_fraction'].value=x.fraction??x.minute??0;f.elements[p+'_hour'].value=x.hour??x.valorHora??0;f.elements[p+'_full12h'].value=x.full12h??0;f.elements[p+'_monthly'].value=x.monthly??x.mensualidad??0});let c=get(KEY.config,defaults.config);rf.elements.receiptPrefix.value=c.receiptPrefix||'FA';rf.elements.nextReceiptNumber.value=c.nextReceiptNumber||1;rf.elements.customMessage.value=c.customMessage||'';rf.elements.additionalInfo.value=c.additionalInfo||'';if(rf.elements.receiptNit)rf.elements.receiptNit.value=c.receiptNit??c.nit??'';if(rf.elements.receiptPhone)rf.elements.receiptPhone.value=c.receiptPhone??c.telefonos??c.phone??'';if(rf.elements.receiptAddress)rf.elements.receiptAddress.value=c.receiptAddress??c.direccion1??c.address??'';
 const receiptChecks={entryShowBusiness:true,entryShowPlate:true,entryShowEntry:true,entryShowHours:true,exitShowBusiness:true,exitShowPlate:true,exitShowEntry:true,exitShowExit:true,exitShowService:true,exitShowTime:true,exitShowTotal:true,exitShowPaymentMethod:true,monthlyShowBusiness:true,monthlyShowDocument:true};Object.keys(receiptChecks).forEach(k=>{if(rf.elements[k])rf.elements[k].checked=c[k]===undefined?receiptChecks[k]:!!c[k]});
-const receiptLabels={entryLabelNit:'NIT.',entryLabelPhone:'TEL.',entryLabelAddress:'DIR.',entryLabelPlate:'Placa',entryLabelEntry:'Entrada',exitLabelNit:'NIT.',exitLabelPhone:'TEL.',exitLabelAddress:'DIR.',exitLabelPlate:'Placa',exitLabelEntry:'Entrada',exitLabelExit:'Salida',exitLabelService:'Servicio',exitLabelTime:'Tiempo',exitLabelTotal:'Total',exitLabelPaymentMethod:'Forma de pago',monthlyLabelReceipt:'Consecutivo',monthlyLabelPlate:'Placa',monthlyLabelClient:'Cliente',monthlyLabelDocument:'Documento',monthlyLabelVehicle:'Vehículo',monthlyLabelPaymentDate:'Fecha de pago',monthlyLabelStart:'Inicio',monthlyLabelEnd:'Vence',monthlyLabelValue:'Valor',monthlyLabelPaymentMethod:'Forma de pago',monthlyLabelNit:'NIT.',monthlyLabelPhone:'TEL.',monthlyLabelAddress:'DIR.'};Object.keys(receiptLabels).forEach(k=>{if(rf.elements[k])rf.elements[k].value=c[k]??receiptLabels[k]});if(rf.elements.entryHoursText)rf.elements.entryHoursText.value=c.entryHoursText||'Lunes a Miércoles:\n06:30 a 21:30\nJueves a Sábado:\n06:30 a 23:00\nDomingos y Festivos:\n06:30 a 19:00';pf.elements.razon_social.value=c.razon_social||c.parkingName||'';pf.elements.nit.value=c.nit||'';pf.elements.direccion1.value=c.direccion1||c.address||'';pf.elements.telefonos.value=c.telefonos||c.phone||'';pf.elements.propietario.value=c.propietario||'';pf.elements.email.value=c.email||'';pf.elements.limiteVehiculos.value=c.limiteVehiculos||c.capacity||0;pf.elements.parkingAdditionalInfo.value=c.parkingAdditionalInfo||''}; f.onsubmit=e=>{e.preventDefault();[['5','car'],['6','moto'],['7','bike']].forEach(([id,p])=>{let x=s.find(z=>String(z.id)===id)||{id};x.fraction=+f.elements[p+'_fraction'].value||0;x.hour=+f.elements[p+'_hour'].value||0;x.full12h=+f.elements[p+'_full12h'].value||0;x.monthly=+f.elements[p+'_monthly'].value||0;if(!s.includes(x))s.push(x)});set(KEY.services,s);fpAlert('Tarifas guardadas.');}; rf.onsubmit=e=>{e.preventDefault();let c=get(KEY.config,defaults.config);c={...c,receiptPrefix:rf.elements.receiptPrefix.value,nextReceiptNumber:+rf.elements.nextReceiptNumber.value||1,customMessage:rf.elements.customMessage.value,additionalInfo:rf.elements.additionalInfo.value,receiptNit:rf.elements.receiptNit?rf.elements.receiptNit.value.trim():'',receiptPhone:rf.elements.receiptPhone?rf.elements.receiptPhone.value.trim():'',receiptAddress:rf.elements.receiptAddress?rf.elements.receiptAddress.value.trim():''};['entryShowBusiness','entryShowPlate','entryShowEntry','entryShowHours','exitShowBusiness','exitShowPlate','exitShowEntry','exitShowExit','exitShowService','exitShowTime','exitShowTotal','exitShowPaymentMethod','monthlyShowBusiness','monthlyShowDocument'].forEach(k=>{if(rf.elements[k])c[k]=!!rf.elements[k].checked});['entryLabelNit','entryLabelPhone','entryLabelAddress','entryLabelPlate','entryLabelEntry','exitLabelNit','exitLabelPhone','exitLabelAddress','exitLabelPlate','exitLabelEntry','exitLabelExit','exitLabelService','exitLabelTime','exitLabelTotal','exitLabelPaymentMethod','monthlyLabelReceipt','monthlyLabelPlate','monthlyLabelClient','monthlyLabelDocument','monthlyLabelVehicle','monthlyLabelPaymentDate','monthlyLabelStart','monthlyLabelEnd','monthlyLabelValue','monthlyLabelPaymentMethod','monthlyLabelNit','monthlyLabelPhone','monthlyLabelAddress'].forEach(k=>{if(rf.elements[k])c[k]=rf.elements[k].value.trim()});c.entryHoursText=rf.elements.entryHoursText?rf.elements.entryHoursText.value:'';set(KEY.config,c);localStorage.setItem('facaparking_offline_receipt_v4',String((+c.nextReceiptNumber||1)-1));fpAlert('Información de recibos guardada.');}; pf.onsubmit=e=>{e.preventDefault();let c=get(KEY.config,defaults.config);c={...c,parkingName:pf.elements.razon_social.value,nit:pf.elements.nit.value,direccion1:pf.elements.direccion1.value,address:pf.elements.direccion1.value,telefonos:pf.elements.telefonos.value,phone:pf.elements.telefonos.value,propietario:pf.elements.propietario.value,email:pf.elements.email.value,limiteVehiculos:pf.elements.limiteVehiculos.value,capacity:+pf.elements.limiteVehiculos.value||0,parkingAdditionalInfo:pf.elements.parkingAdditionalInfo.value};set(KEY.config,c);fpAlert('Información del local guardada.');}; fill(); initReceiptTabs(rf); wireReceiptPreview(rf,pf); initWipeSection(); initLoginHistory()}
+const receiptLabels={entryLabelNit:'NIT.',entryLabelPhone:'TEL.',entryLabelAddress:'DIR.',entryLabelPlate:'Placa',entryLabelEntry:'Entrada',exitLabelNit:'NIT.',exitLabelPhone:'TEL.',exitLabelAddress:'DIR.',exitLabelPlate:'Placa',exitLabelEntry:'Entrada',exitLabelExit:'Salida',exitLabelService:'Servicio',exitLabelTime:'Tiempo',exitLabelTotal:'Total',exitLabelPaymentMethod:'Forma de pago',monthlyLabelReceipt:'Consecutivo',monthlyLabelPlate:'Placa',monthlyLabelClient:'Cliente',monthlyLabelDocument:'Teléfono',monthlyLabelVehicle:'Vehículo',monthlyLabelPaymentDate:'Fecha de pago',monthlyLabelStart:'Inicio',monthlyLabelEnd:'Vence',monthlyLabelValue:'Valor',monthlyLabelPaymentMethod:'Forma de pago',monthlyLabelNit:'NIT.',monthlyLabelPhone:'TEL.',monthlyLabelAddress:'DIR.'};Object.keys(receiptLabels).forEach(k=>{if(rf.elements[k])rf.elements[k].value=c[k]??receiptLabels[k]});if(rf.elements.entryHoursText)rf.elements.entryHoursText.value=c.entryHoursText||'Lunes a Miércoles:\n06:30 a 21:30\nJueves a Sábado:\n06:30 a 23:00\nDomingos y Festivos:\n06:30 a 19:00';pf.elements.razon_social.value=c.razon_social||c.parkingName||'';pf.elements.nit.value=c.nit||'';pf.elements.direccion1.value=c.direccion1||c.address||'';pf.elements.telefonos.value=c.telefonos||c.phone||'';pf.elements.propietario.value=c.propietario||'';pf.elements.email.value=c.email||'';pf.elements.limiteVehiculos.value=c.limiteVehiculos||c.capacity||0;pf.elements.parkingAdditionalInfo.value=c.parkingAdditionalInfo||''}; f.onsubmit=e=>{e.preventDefault();[['5','car'],['6','moto'],['7','bike']].forEach(([id,p])=>{let x=s.find(z=>String(z.id)===id)||{id};x.fraction=+f.elements[p+'_fraction'].value||0;x.hour=+f.elements[p+'_hour'].value||0;x.full12h=+f.elements[p+'_full12h'].value||0;x.monthly=+f.elements[p+'_monthly'].value||0;if(!s.includes(x))s.push(x)});set(KEY.services,s);fpAlert('Tarifas guardadas.');}; rf.onsubmit=e=>{e.preventDefault();let c=get(KEY.config,defaults.config);c={...c,receiptPrefix:rf.elements.receiptPrefix.value,nextReceiptNumber:+rf.elements.nextReceiptNumber.value||1,customMessage:rf.elements.customMessage.value,additionalInfo:rf.elements.additionalInfo.value,receiptNit:rf.elements.receiptNit?rf.elements.receiptNit.value.trim():'',receiptPhone:rf.elements.receiptPhone?rf.elements.receiptPhone.value.trim():'',receiptAddress:rf.elements.receiptAddress?rf.elements.receiptAddress.value.trim():''};['entryShowBusiness','entryShowPlate','entryShowEntry','entryShowHours','exitShowBusiness','exitShowPlate','exitShowEntry','exitShowExit','exitShowService','exitShowTime','exitShowTotal','exitShowPaymentMethod','monthlyShowBusiness','monthlyShowDocument'].forEach(k=>{if(rf.elements[k])c[k]=!!rf.elements[k].checked});['entryLabelNit','entryLabelPhone','entryLabelAddress','entryLabelPlate','entryLabelEntry','exitLabelNit','exitLabelPhone','exitLabelAddress','exitLabelPlate','exitLabelEntry','exitLabelExit','exitLabelService','exitLabelTime','exitLabelTotal','exitLabelPaymentMethod','monthlyLabelReceipt','monthlyLabelPlate','monthlyLabelClient','monthlyLabelDocument','monthlyLabelVehicle','monthlyLabelPaymentDate','monthlyLabelStart','monthlyLabelEnd','monthlyLabelValue','monthlyLabelPaymentMethod','monthlyLabelNit','monthlyLabelPhone','monthlyLabelAddress'].forEach(k=>{if(rf.elements[k])c[k]=rf.elements[k].value.trim()});c.entryHoursText=rf.elements.entryHoursText?rf.elements.entryHoursText.value:'';set(KEY.config,c);localStorage.setItem('facaparking_offline_receipt_v4',String((+c.nextReceiptNumber||1)-1));fpAlert('Información de recibos guardada.');}; pf.onsubmit=e=>{e.preventDefault();let c=get(KEY.config,defaults.config);c={...c,parkingName:pf.elements.razon_social.value,nit:pf.elements.nit.value,direccion1:pf.elements.direccion1.value,address:pf.elements.direccion1.value,telefonos:pf.elements.telefonos.value,phone:pf.elements.telefonos.value,propietario:pf.elements.propietario.value,email:pf.elements.email.value,limiteVehiculos:pf.elements.limiteVehiculos.value,capacity:+pf.elements.limiteVehiculos.value||0,parkingAdditionalInfo:pf.elements.parkingAdditionalInfo.value};set(KEY.config,c);fpAlert('Información del local guardada.');}; fill(); initReceiptTabs(rf); wireReceiptPreview(rf,pf); initWipeSection(); initLoginHistory()}
 function initLoginHistory(){
   const section=document.getElementById('fpLoginHistorySection');
   if(!section) return;
@@ -2566,4 +2669,4 @@ window.FP={get,set,KEY,money,ensure,activateDueAdvancePeriods};document.addEvent
 })(window);
 
 // v63 visual fixes
-(function(){const st=document.createElement('style');st.textContent='.fp-print-icon{width:18px!important;height:18px!important;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.fp-arrow-btn{width:34px!important;height:30px!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;background:#0b2748!important;color:#fff!important;border-color:#0b2748!important}.fp-arrow-btn svg{width:15px;height:15px;fill:none;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}';document.head&&document.head.appendChild(st)})();
+(function(){const st=document.createElement('style');st.textContent='tr.fp-disc-row>td{background:#ffebee!important;color:#c62828!important;font-weight:700}.fp-print-icon{width:18px!important;height:18px!important;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.fp-arrow-btn{width:34px!important;height:30px!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;background:#0b2748!important;color:#fff!important;border-color:#0b2748!important}.fp-arrow-btn svg{width:15px;height:15px;fill:none;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}';document.head&&document.head.appendChild(st)})();
