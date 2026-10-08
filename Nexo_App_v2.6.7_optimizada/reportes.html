@@ -1170,8 +1170,8 @@ html,body{background:#f7f8fa!important;color:#30343b!important}.wrapper,.main-pa
 .printSale,.printMonthlyPayment{width:42px!important;height:38px!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;background:#fff!important;color:#0b2748!important;border:1px solid #d5dbe2!important;border-radius:7px!important;box-shadow:none!important}
 .printSale i,.printMonthlyPayment i{margin:0!important;font-size:16px!important;color:#0b2748!important}
 /* Paginación / cuadros de navegación */
-.fp-pager button,.fp-pager button.active,#salesPager button{background:var(--fp-nav-blue)!important;border-color:var(--fp-nav-blue)!important;color:#fff!important}
-.fp-pager button:disabled,#salesPager button:disabled{background:#eef1f4!important;border-color:#d7dce2!important;color:#8a929c!important}
+.fp-pager button,.fp-pager button.active,#salesPager button,#cashSalesPager button,#loginHistoryPager button{background:var(--fp-nav-blue)!important;border-color:var(--fp-nav-blue)!important;color:#fff!important}
+.fp-pager button:disabled,#salesPager button:disabled,#cashSalesPager button:disabled,#loginHistoryPager button:disabled{background:#eef1f4!important;border-color:#d7dce2!important;color:#8a929c!important}
 /* Selectores: caja limpia y flecha azul */
 select.form-control{color:#30343b!important}
 /* Íconos de navegación pequeños y uniformes */
@@ -1273,6 +1273,22 @@ select.form-control{color:#30343b!important}
 </div>
 </div>
 
+<h4 style="margin-top:30px">Fidelidad de clientes</h4>
+<p class="text-muted" style="margin:0 0 10px">Cada placa cuenta como un cliente. Se mide siempre con todas las entradas, desde el día uno hasta hoy (no depende del filtro de arriba). El puntaje (0–100) pondera: frecuencia 35%, duración 25%, regularidad 25% y recencia 15%.</p>
+<div class="row">
+<div class="col-md-3"><div class="card fp-kpi-card fp-kpi-blue"><div class="card-body"><span class="fp-kpi-icon">👥</span><h3 id="loyClients">0</h3><p>Clientes (placas)</p></div></div></div>
+<div class="col-md-3"><div class="card fp-kpi-card fp-kpi-green"><div class="card-body"><span class="fp-kpi-icon">🔁</span><h3 id="loyReturning">0</h3><p>Clientes recurrentes (2+ visitas)</p></div></div></div>
+<div class="col-md-3"><div class="card fp-kpi-card fp-kpi-orange"><div class="card-body"><span class="fp-kpi-icon">📊</span><h3 id="loyReturnRate">0%</h3><p>Tasa de retorno</p></div></div></div>
+<div class="col-md-3"><div class="card fp-kpi-card fp-kpi-red"><div class="card-body"><span class="fp-kpi-icon">🚗</span><h3 id="loyAvgVisits">0</h3><p>Visitas por cliente</p></div></div></div>
+</div>
+<div class="row" style="margin-top:20px">
+<div class="col-md-4"><div class="card fp-chart-card" style="height:100%"><div class="card-body"><h5 style="margin-top:0">Nivel de fidelidad</h5><div id="loyaltyLevels"></div><p class="text-muted" style="margin:14px 0 0;font-size:12px">Nuevo: 1 visita · Ocasional: puntaje menor a 45 · Frecuente: 45–69 · Fiel: 70 o más.<br><b>Frecuencia</b> (8 visitas = 100%) · <b>Duración</b> (permanencia promedio, 4 h = 100%) · <b>Regularidad</b> (días parejos entre visitas, desde 3 visitas) · <b>Recencia</b> (última visita, 0% a los 30 días).</p></div></div></div>
+<div class="col-md-8"><div class="card fp-chart-card" style="height:100%"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h5 style="margin:0">Clientes con mayor puntaje (top 40)</h5><label style="margin:0;font-size:13px">Ver: <select id="loyaltyLevelFilter" class="form-control" style="display:inline-block;width:auto;min-width:150px"><option value="">Todos</option><option value="fiel">Fiel</option><option value="frecuente">Frecuente</option><option value="ocasional">Ocasional</option><option value="nuevo">Nuevo</option></select></label></div>
+<div class="table-responsive"><table class="table" id="loyaltyTable"><thead class="text-primary"><tr><th>Placa</th><th>Nivel</th><th>Puntaje</th><th>Visitas</th><th>Total pagado</th><th>Estadía prom.</th><th>Prom. entre visitas</th><th>Última visita</th></tr></thead><tbody></tbody></table></div>
+<div id="loyaltyPager"></div>
+<small class="text-muted" id="loyaltyNote"></small></div></div></div>
+</div>
+
 <h4 style="margin-top:30px">Cierres de caja</h4>
 <div class="table-responsive"><table class="table" id="reportClosingsTable"><thead class="text-primary"><tr><th>Apertura</th><th>Cierre</th><th>Usuario</th><th>Ventas</th><th>Egresos</th><th>Esperado</th><th>Contado</th><th>Diferencia</th><th>Recibo inicio</th><th>Recibo final</th><th>Estado</th><th>Reporte</th></tr></thead><tbody></tbody></table></div>
 
@@ -1315,20 +1331,32 @@ select.form-control{color:#30343b!important}
   function activeMonthlyFor(placa){
     var norm=function(v){return String(v==null?'':v).trim().toUpperCase().replace(/[\s-]/g,'');};
     var wanted=norm(placa), today=new Date();today.setHours(0,0,0,0);
-    return readArr('fp_monthly').find(function(m){
+    var found=readArr('fp_monthly').filter(function(m){
       if(!m||norm(m.plate!=null?m.plate:m.placa)!==wanted||m.active===false)return false;
       var st=m.start?new Date(m.start+'T00:00:00'):null, en=m.end?new Date(m.end+'T00:00:00'):null;
       if(st&&!isNaN(st)&&today<st)return false;
       if(en&&!isNaN(en)){en.setDate(en.getDate()+3);if(today>en)return false;}
       return true;
-    })||null;
+    });
+    found.sort(function(x,y){return String(y.end||'').localeCompare(String(x.end||''))||String(y.updatedAt||'').localeCompare(String(x.updatedAt||''));});
+    return found[0]||null;
   }
   function insideNightWindow(m,when){
-    var hm=function(v){var r=String(v==null?'':v).trim().match(/^(\d{1,2}):(\d{2})/);return r?(+r[1])*60+(+r[2]):null;};
+    var hm=function(v){
+      if(v==null)return null;
+      var t=String(v).trim().toLowerCase().replace(/\./g,'').replace(/\s+/g,'');
+      var r=t.match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?(am|pm)?h?$/);
+      if(!r)return null;
+      var h=+r[1],mi=+(r[2]||0);
+      if(r[3]==='pm'&&h<12)h+=12; if(r[3]==='am'&&h===12)h=0;
+      return (h>23||mi>59)?null:h*60+mi;
+    };
     var a=hm(m.nightEntryLimit),b=hm(m.nightExitLimit);
     if(a==null||b==null)return true;
     var n=when.getHours()*60+when.getMinutes();
-    return a<=b?(n>=a&&n<=b):(n>=a||n<=b);
+    if(a<b)return n>=a&&n<b;
+    if(a>b)return n>=a||n<b;
+    return true;
   }
   function nowLocalYmd(){var n=new Date();return n.getFullYear()+'-'+pad(n.getMonth()+1)+'-'+pad(n.getDate());}
   function fillTarifaSelect(){

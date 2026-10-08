@@ -5,7 +5,26 @@
 'use strict';
 const {KEY,defaults,get,set,entries,paymentLabel,cashPart,plateUpper,hashPassword,verifyPassword,needsRehash}=window.FPModel;
 /* Mantener igual a "version" de package.json (y a package-lock.json). */
-const APP_VERSION='2.6.34';
+const APP_VERSION='2.6.49';
+/* Paginador único de toda la app: "Anterior · Página X de Y · N registros · Siguiente",
+ * botones azules (grises si están deshabilitados). Todas las listas lo usan para verse igual.
+ * nouns = 'singular|plural' (ej. 'venta|ventas'); go(n) recibe la página a la que se va. */
+function fpPager(el,page,pages,total,nouns,go){
+  if(!el) return;
+  if(!document.getElementById('fp-pager-style')){
+    const st=document.createElement('style'); st.id='fp-pager-style';
+    st.textContent='.fp-pager-simple{display:block!important;text-align:center;margin-top:15px}'+
+      '.fp-pager-simple button{background:var(--fp-nav-blue,#0b2748)!important;border:1px solid var(--fp-nav-blue,#0b2748)!important;color:#fff!important;min-width:0!important;height:auto!important;border-radius:3px}'+
+      '.fp-pager-simple button:disabled{background:#eef1f4!important;border-color:#d7dce2!important;color:#8a929c!important;opacity:1!important}';
+    document.head.appendChild(st);
+  }
+  el.classList.remove('fp-pager'); el.classList.add('fp-pager-simple');
+  const n=String(nouns||'registro|registros').split('|'), word=total===1?n[0]:(n[1]||n[0]);
+  el.innerHTML=`<button type="button" class="btn btn-sm btn-default" data-pg="prev" ${page<=1?'disabled':''}>Anterior</button> <span style="display:inline-block;margin:0 12px;line-height:32px">Página ${page} de ${pages} · ${total} ${word}</span> <button type="button" class="btn btn-sm btn-default" data-pg="next" ${page>=pages?'disabled':''}>Siguiente</button>`;
+  const pv=el.querySelector('[data-pg="prev"]'), nx=el.querySelector('[data-pg="next"]');
+  if(pv) pv.onclick=()=>{if(page>1) go(page-1)};
+  if(nx) nx.onclick=()=>{if(page<pages) go(page+1)};
+}
 /* Historial de ingresos (login history): la clave debe quedar disponible en
  * todo el archivo, no solo dentro de initLogin(), porque initLoginHistory()
  * (usada en Configuración) también la necesita. Antes estaba declarada solo
@@ -325,6 +344,34 @@ function drawLineChart(canvasId,labels,series,opts){
        if(isHover){ctx.lineWidth=1.5;ctx.strokeStyle='#fff';ctx.stroke();}
      });
    });
+   // Resalta la venta mayor (verde oscuro, arriba) y la menor (naranja, abajo) de las series con highlight:true.
+   // La menor se toma entre los períodos que sí tuvieron ventas (valor > 0); si solo hay uno, se marca solo la mayor.
+   series.filter(s=>s.highlight).forEach(s=>{
+     const idx=s.values.map((v,i)=>({v:Number(v)||0,i})).filter(o=>o.v>0);
+     if(!idx.length) return;
+     const hi=idx.reduce((a,o)=>o.v>a.v?o:a), lo=idx.reduce((a,o)=>o.v<a.v?o:a);
+     const fmt=opts.formatTooltip||(v=>String(Math.round(v)));
+     const mark=(o,color,text,above)=>{
+       const x=xAt(o.i), y=yAt(o.v);
+       ctx.save();
+       ctx.beginPath(); ctx.arc(x,y,8,0,Math.PI*2); ctx.fillStyle='rgba(255,255,255,.9)'; ctx.fill();
+       ctx.lineWidth=3; ctx.strokeStyle=color; ctx.stroke();
+       ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.fillStyle=color; ctx.fill();
+       ctx.font='bold 11px Arial'; ctx.textBaseline='middle';
+       const w=ctx.measureText(text).width+12, h=18;
+       let bx=Math.min(Math.max(x-w/2,padding.left),cssWidth-padding.right-w);
+       let by=above?y-h-12:y+12;
+       if(by<2) by=y+12;
+       if(by+h>cssHeight-padding.bottom+2) by=y-h-12;
+       ctx.fillStyle=color; ctx.beginPath();
+       if(ctx.roundRect) ctx.roundRect(bx,by,w,h,5); else ctx.rect(bx,by,w,h);
+       ctx.fill();
+       ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.fillText(text,bx+w/2,by+h/2+0.5);
+       ctx.restore();
+     };
+     if(lo.i!==hi.i&&lo.v!==hi.v) mark(lo,'#e68a00','Menor: '+fmt(lo.v),false);
+     mark(hi,'#1f7a4d','Mayor: '+fmt(hi.v),true);
+   });
    if(series.length>1){
      let lx=padding.left;
      series.forEach(s=>{
@@ -399,25 +446,11 @@ function activateDueAdvancePeriods(){
     return changed;
   }catch(e){console.error('Renovación automática de mensualidades:',e);return false}
 }
-/* Desactiva las mensualidades que ya superaron el plazo de gracia de 3 días.
- * Antes esto solo corría dentro de initMonthly() (al abrir la pantalla Mensualidades), así que
- * el Dashboard mostraba una mensualidad vencida como "en mora" hasta que alguien entraba
- * a Mensualidades, y entonces desaparecía. Ahora corre en cada carga de página (ensure) y en
- * cada redibujado del Dashboard, con la misma regla en todas partes. Solo escribe si algo cambió. */
-function deactivateExpiredMonthlies(){
-  try{
-    const list=get('fp_monthly',[]); if(!Array.isArray(list)||!list.length)return false;
-    const today=new Date();today.setHours(0,0,0,0);let changed=false;
-    list.forEach(x=>{
-      if(!x)return;
-      const en=monthlyEndWithGrace(x);
-      const a=!!x.active && (!en || en>=today);
-      if(a!==!!x.active){x.active=a;changed=true}
-    });
-    if(changed)set('fp_monthly',list);
-    return changed;
-  }catch(e){console.error('Vencimiento de mensualidades:',e);return false}
-}
+/* Antes desactivaba las mensualidades que superaban el plazo de gracia de 3 días. Ese límite se
+ * eliminó: una mensualidad en mora sigue activa y se puede pagar sin importar cuántos días lleve
+ * vencida (se ve como "En mora (N d)"). La función se conserva como no-op porque se llama desde
+ * ensure(), el Dashboard y Mensualidades. */
+function deactivateExpiredMonthlies(){return false}
 function ensure(){let users=get(KEY.users,null);if(!Array.isArray(users)||!users.length){let old=get(KEY.user,null);users=old?[old]:[{...defaults.user,password:hashPassword(defaults.user.password)},{username:'admin',name:'admin',document:'',email:'',phone:'',role:'Administrador',password:hashPassword('admin')}];set(KEY.users,users)}
  /* El usuario "Felipe" es la cuenta raíz del sistema y siempre debe tener rol
   * Superadmin, sin importar cómo haya quedado guardado antes (instalaciones
@@ -746,8 +779,8 @@ function initDashboard(){
  open.forEach(e=>{let id=String(e.idTarifa),key=id==='5'?'Carro':id==='6'?'Moto':id==='7'?'Cicla':(String(e.tarifaNombre||e.tipoVehiculo||'').toLowerCase().includes('moto')?'Moto':String(e.tarifaNombre||e.tipoVehiculo||'').toLowerCase().includes('cicla')?'Cicla':'Carro');counts[key]++});
  const map={dashCar:'Carro',dashMoto:'Moto',dashCicla:'Cicla'};Object.keys(map).forEach(id=>{let node=document.getElementById(id);if(node)node.textContent=counts[map[id]]||0});
   let today0=new Date();today0.setHours(0,0,0,0);
- // Mensualidades a mostrar en el dashboard: (1) activas en mora dentro de los 3 días de gracia (días<0), que vencen hoy (días=0) o próximas a vencer (1 a 6 días);
- // (2) las ya vencidas más allá de la gracia, que la app desactiva sola: se siguen mostrando con sus días de mora, sin límite de días, hasta que se renueven, se editen o se eliminen.
+ // Mensualidades a mostrar en el dashboard: (1) activas en mora (días<0, sin límite de días), que vencen hoy (días=0) o próximas a vencer (1 a 6 días);
+ // (2) las inactivas ya vencidas (desactivadas antes de quitar el límite de 3 días o a mano): se siguen mostrando con sus días de mora, sin límite de días, hasta que se renueven, se editen o se eliminen.
  activateDueAdvancePeriods();deactivateExpiredMonthlies();
  const monthlyAll=get('fp_monthly',[]).filter(m=>m&&m.end);
  const toDays=m=>{let end=new Date(String(m.end)+'T00:00:00');end.setHours(0,0,0,0);return Math.round((end-today0)/86400000)};
@@ -796,10 +829,7 @@ function initPayments(){
    tb.querySelectorAll('.printSale').forEach(b=>b.onclick=()=>printSaleReceipt(rows[+b.dataset.i]));
    tb.querySelectorAll('.editSale').forEach(b=>b.onclick=()=>openEditSalePayment(rows[+b.dataset.i]));
    if(pager){
-     pager.innerHTML=`<button type="button" class="btn btn-sm btn-default" id="salesPrev" ${page<=1?'disabled':''}>Anterior</button> <span style="display:inline-block;margin:0 12px;line-height:32px">Página ${page} de ${pages} · ${allRows.length} ventas</span> <button type="button" class="btn btn-sm btn-default" id="salesNext" ${page>=pages?'disabled':''}>Siguiente</button>`;
-     let pv=document.getElementById('salesPrev'),nx=document.getElementById('salesNext');
-     if(pv)pv.onclick=()=>{if(page>1){page--;render()}};
-     if(nx)nx.onclick=()=>{if(page<pages){page++;render()}};
+     fpPager(pager,page,pages,allRows.length,'venta|ventas',p=>{page=p;render()});
    }
    return {rows:allRows,sum:allRows.reduce((a,e)=>a+(+e.total||0),0)}
  }
@@ -821,6 +851,35 @@ function initPayments(){
    });
  }
 
+ // Pasa una venta ya registrada a Pendientes: la entrada queda con pendingMonthlyConfirmation:true
+ // (sin forma de pago ni registerId) y se crea el cobro en fp_monthly_extra_charges con
+ // confirmed:false, igual que el botón "Pendiente" de Entradas. Deja de contar como venta
+ // en Ventas/Reportes/Caja hasta que se confirme el pago en Pendientes.
+ function markEntryPending(entry){
+   const idStr=String(entry.id);
+   ['fp_entries',ARCHIVE_KEY].forEach(k=>{
+     const arr=get(k,[]);
+     if(!Array.isArray(arr)||!arr.length)return;
+     let changed=false;
+     const updated=arr.map(e=>{
+       if(e&&String(e.id)===idStr){
+         changed=true;
+         const c=Object.assign({},e,{pendingMonthlyConfirmation:true,cashAmount:0,nequiAmount:0});
+         delete c.paymentMethod; delete c.idTipoPago; delete c.registerId;
+         return c;
+       }
+       return e;
+     });
+     if(changed)set(k,updated);
+   });
+   const pend=get('fp_monthly_extra_charges',[]);
+   const list=Array.isArray(pend)?pend:[];
+   if(!list.some(x=>x&&String(x.entryId)===idStr&&x.confirmed!==true)){
+     list.push({id:'MX'+Date.now(),monthlyId:entry.linkedMonthlyId||null,plate:entry.placa||entry.plate||'',entryId:entry.id,amount:Math.round(Number(entry.total)||0),dateTime:new Date().toISOString(),receiptPrefix:entry.reciboPrefijo,receiptNumber:entry.reciboNumero,confirmed:false,manual:true});
+     set('fp_monthly_extra_charges',list);
+   }
+ }
+
  function openEditSalePayment(entry){
    if(!entry||entry.id==null){fpAlert('No fue posible identificar esta venta.');return;}
    const overlay=document.getElementById('editSaleOverlay');
@@ -828,7 +887,7 @@ function initPayments(){
      const method=prompt('Forma de pago: efectivo, electronico o ambos', paymentType(entry)||'efectivo');
      if(method===null)return;
      const pmIn=method.trim().toLowerCase();
-     let pm; if(['efectivo','cash'].includes(pmIn))pm='cash'; else if(['electronico','electrónico','nequi'].includes(pmIn))pm='nequi'; else if(['ambos','both'].includes(pmIn))pm='both'; else {fpAlert('Forma de pago no válida.');return;}
+     let pm; if(['efectivo','cash'].includes(pmIn))pm='cash'; else if(['electronico','electrónico','nequi'].includes(pmIn))pm='nequi'; else if(['ambos','both'].includes(pmIn))pm='both'; else if(['pendiente','pending'].includes(pmIn)){markEntryPending(entry);render();return;} else {fpAlert('Forma de pago no válida.');return;}
      const totalVal=Number(entry.total)||0;
      let cashAmount=0,nequiAmount=0;
      if(pm==='cash')cashAmount=totalVal; else if(pm==='nequi')nequiAmount=totalVal; else {cashAmount=+(prompt('¿Cuánto en efectivo?','0')||0); if(!Number.isFinite(cashAmount)||cashAmount<0||cashAmount>totalVal){fpAlert('Valor de efectivo no válido.');return;} nequiAmount=totalVal-cashAmount;}
@@ -848,6 +907,8 @@ function initPayments(){
    function applyMethod(m){
      state.method=m;
      methodBtns.forEach(b=>b.classList.toggle('active',b.dataset.editMethod===m));
+     msg.style.display='none';
+     if(m==='pending'){amountsBox.style.display='none';msg.textContent='La venta saldrá de Ventas y quedará en Pendientes hasta que confirme el pago.';msg.style.display='block';return;}
      if(m==='cash'){cashInput.value=total;cashInput.readOnly=true;nequiInput.value=0;amountsBox.style.display='';}
      else if(m==='nequi'){cashInput.value=0;cashInput.readOnly=true;nequiInput.value=total;amountsBox.style.display='';}
      else {cashInput.readOnly=false;let c=state.cash>0&&state.cash<=total?state.cash:0;cashInput.value=c;nequiInput.value=Math.max(0,total-c);amountsBox.style.display='';}
@@ -860,6 +921,7 @@ function initPayments(){
    document.getElementById('editSaleCloseBtn').onclick=close;
    document.getElementById('editSaleCancelBtn').onclick=close;
    document.getElementById('editSaleSaveBtn').onclick=()=>{
+     if(state.method==='pending'){markEntryPending(entry);close();render();return;}
      let cashAmount=0,nequiAmount=0;
      if(state.method==='cash')cashAmount=total;
      else if(state.method==='nequi')nequiAmount=total;
@@ -1001,6 +1063,118 @@ function initReports(){
    if(!from&&!to) return 'Todo el historial';
    if(from&&to&&dayKey(from)===dayKey(to)) return dayLabel(from)+'/'+from.getFullYear();
    return (from?dayLabel(from)+'/'+from.getFullYear():'…')+' — '+(to?dayLabel(to)+'/'+to.getFullYear():'…');
+ }
+
+ // ===== Fidelidad de clientes =====
+ // Cada placa cuenta como un cliente. Se mide con las ENTRADAS del período filtrado.
+ // El PUNTAJE de fidelidad (0-100) pondera cuatro factores (ajustable en LOYALTY_WEIGHTS):
+ //   Frecuencia 35%  : visitas del período frente a LOYALTY_TARGET_VISITS (8 visitas = 100%).
+ //   Duración 25%    : permanencia promedio por visita frente a LOYALTY_TARGET_HOURS (4 h = 100%).
+ //   Regularidad 25% : qué tan parejos son los días entre visitas (1 - variación). Necesita 3+ visitas.
+ //   Recencia 15%    : qué tan reciente fue la última visita; baja a 0 a los LOYALTY_RECENCY_DAYS (30) días.
+ // Nivel: Nuevo (1 visita) · Ocasional (puntaje < 45) · Frecuente (45-69) · Fiel (70+).
+ const LOYALTY_WEIGHTS={frecuencia:0.35,duracion:0.25,regularidad:0.25,recencia:0.15};
+ const LOYALTY_TARGET_VISITS=8, LOYALTY_TARGET_HOURS=4, LOYALTY_RECENCY_DAYS=30;
+ const LOYALTY_LEVELS=[
+   {key:'fiel',label:'Fiel',minScore:70,color:'#ff9f00'},
+   {key:'frecuente',label:'Frecuente',minScore:45,color:'#33c17a'},
+   {key:'ocasional',label:'Ocasional',minScore:0,color:'#3aa0ff'},
+   {key:'nuevo',label:'Nuevo (1 visita)',minScore:0,color:'#8b93a3'}
+ ];
+ const LOYALTY_TABLE_LIMIT=40, LOYALTY_PAGE_SIZE=10; // con "Todos": los 40 mejores, de a 10 por página
+ let loyaltyPage=1;
+ const clamp01=x=>Math.max(0,Math.min(1,x));
+ function loyaltyLevel(visits,score){
+   if(visits<=1) return LOYALTY_LEVELS.find(l=>l.key==='nuevo');
+   return LOYALTY_LEVELS.find(l=>l.key!=='nuevo'&&score>=l.minScore);
+ }
+ // Devuelve los 4 factores (0-1) y el puntaje final (0-100) de una placa.
+ function loyaltyScore(c,ref){
+   const frec=clamp01(c.visits/LOYALTY_TARGET_VISITS);
+   const dur=c.avgHours==null?0:clamp01(c.avgHours/LOYALTY_TARGET_HOURS);
+   let reg=0;
+   if(c.visits>=3){
+     const gaps=[]; for(let i=1;i<c.dates.length;i++) gaps.push((startOfDay(c.dates[i])-startOfDay(c.dates[i-1]))/86400000);
+     const mean=gaps.reduce((a,g)=>a+g,0)/gaps.length;
+     if(mean>0){
+       const sd=Math.sqrt(gaps.reduce((a,g)=>a+(g-mean)*(g-mean),0)/gaps.length);
+       reg=clamp01(1-sd/mean);
+     } else reg=1; // todas las visitas el mismo día: sin variación
+   }
+   const daysSince=Math.max(0,(startOfDay(ref)-startOfDay(c.last))/86400000);
+   const rec=clamp01(1-daysSince/LOYALTY_RECENCY_DAYS);
+   const W=LOYALTY_WEIGHTS;
+   const score=Math.round((frec*W.frecuencia+dur*W.duracion+reg*W.regularidad+rec*W.recencia)*100);
+   return {frec,dur,reg,rec,score};
+ }
+ function renderLoyalty(visitEntries,sales,refDate){
+   window.__fpLoyaltyArgs=[visitEntries,sales,refDate];
+   const levelSel=document.getElementById('loyaltyLevelFilter');
+   if(levelSel&&!levelSel.__fpBound){levelSel.__fpBound=true;levelSel.addEventListener('change',()=>{loyaltyPage=1;const a=window.__fpLoyaltyArgs;if(a)renderLoyalty(a[0],a[1],a[2])});}
+   const levelWanted=levelSel?levelSel.value:'';
+   const norm=v=>String(v==null?'':v).trim().toUpperCase();
+   const monthlyPlates=new Set((get('fp_monthly',[])||[]).map(m=>norm(m&&(m.plate||m.placa))).filter(Boolean));
+   const map=new Map();
+   visitEntries.forEach(e=>{
+     const plate=norm(e.placa||e.plate); const d=parseFPDate(e.entradaFecha);
+     if(!plate||!d) return;
+     if(!map.has(plate)) map.set(plate,{plate,dates:[],spent:0,stayHours:[]});
+     const c=map.get(plate); c.dates.push(d);
+     const out=e.salidaFecha?parseFPDate(e.salidaFecha):null;
+     if(out&&out>=d) c.stayHours.push((out-d)/3600000);
+   });
+   sales.forEach(x=>{
+     const c=map.get(norm(x.placa||x.plate));
+     if(c) c.spent+=Number(x.total)||0;
+   });
+   const clients=Array.from(map.values()).map(c=>{
+     c.dates.sort((a,b)=>a-b);
+     c.visits=c.dates.length;
+     c.last=c.dates[c.dates.length-1];
+     if(c.visits>=2){
+       let gaps=0; for(let i=1;i<c.dates.length;i++) gaps+=(startOfDay(c.dates[i])-startOfDay(c.dates[i-1]))/86400000;
+       c.avgGap=gaps/(c.visits-1);
+     } else c.avgGap=null;
+     c.avgHours=c.stayHours.length?c.stayHours.reduce((a,h)=>a+h,0)/c.stayHours.length:null;
+     c.parts=loyaltyScore(c,refDate||new Date());
+     c.score=c.parts.score;
+     c.level=loyaltyLevel(c.visits,c.score);
+     c.monthly=monthlyPlates.has(c.plate);
+     return c;
+   }).sort((a,b)=>b.score-a.score||b.visits-a.visits||b.spent-a.spent);
+
+   const total=clients.length, returning=clients.filter(c=>c.visits>=2).length;
+   const totalVisits=clients.reduce((a,c)=>a+c.visits,0);
+   FPView.text('loyClients',total);
+   FPView.text('loyReturning',returning);
+   FPView.text('loyReturnRate',total?Math.round(returning/total*100)+'%':'0%');
+   FPView.text('loyAvgVisits',total?(totalVisits/total).toFixed(1).replace('.',','):'0');
+
+   const lv=document.getElementById('loyaltyLevels');
+   if(lv){
+     lv.innerHTML=LOYALTY_LEVELS.map(l=>{
+       const n=clients.filter(c=>c.level.key===l.key).length, pct=total?Math.round(n/total*100):0;
+       return `<div class="fp-payment-row" style="margin-top:10px"><span class="fp-payment-dot" style="background:${l.color}"></span><span class="fp-payment-label">${esc(l.label)}</span><span class="fp-payment-amount">${n} · ${pct}%</span></div><div class="fp-payment-bar-track"><div class="fp-payment-bar" style="background:${l.color};width:${pct}%"></div></div>`;
+     }).join('');
+   }
+   const tb=document.querySelector('#loyaltyTable tbody');
+   if(tb){
+     const today=startOfDay(new Date());
+     const ago=d=>{const n=Math.round((today-startOfDay(d))/86400000); return n<=0?'hoy':(n===1?'ayer':'hace '+n+' días')};
+     // Con un nivel elegido se muestran todos los clientes de ese nivel; con "Todos" solo los de mayor puntaje.
+     const filtered=levelWanted?clients.filter(c=>c.level.key===levelWanted):clients;
+     const shown=levelWanted?filtered:filtered.slice(0,LOYALTY_TABLE_LIMIT);
+     const loyPages=Math.max(1,Math.ceil(shown.length/LOYALTY_PAGE_SIZE)); if(loyaltyPage>loyPages) loyaltyPage=loyPages; if(loyaltyPage<1) loyaltyPage=1;
+     const pageRows=shown.slice((loyaltyPage-1)*LOYALTY_PAGE_SIZE,loyaltyPage*LOYALTY_PAGE_SIZE);
+     tb.innerHTML=pageRows.length?pageRows.map(c=>`<tr><td><b>${esc(c.plate)}</b>${c.monthly?' <small style="color:#7b1fa2">(mensualidad)</small>':''}</td><td><span style="color:${c.level.color};font-weight:700">${esc(c.level.label.replace(' (1 visita)',''))}</span></td><td><b>${c.score}</b><small class="text-muted">/100</small></td><td>${c.visits}</td><td>${money(c.spent)}</td><td>${c.avgHours==null?'—':c.avgHours.toFixed(1).replace('.',',')+' h'}</td><td>${c.avgGap==null?'—':c.avgGap.toFixed(1).replace('.',',')+' días'}</td><td>${dayLabel(c.last)}/${c.last.getFullYear()} <small class="text-muted">(${ago(c.last)})</small></td></tr>`).join(''):'<tr><td colspan="8">'+(levelWanted?'No hay clientes en este nivel.':'Sin visitas registradas.')+'</td></tr>';
+     const loyPager=document.getElementById('loyaltyPager');
+     if(loyPager){
+       if(shown.length>LOYALTY_PAGE_SIZE) fpPager(loyPager,loyaltyPage,loyPages,shown.length,'cliente|clientes',p=>{loyaltyPage=p;const a=window.__fpLoyaltyArgs;if(a)renderLoyalty(a[0],a[1],a[2])});
+       else loyPager.innerHTML='';
+     }
+     const note=document.getElementById('loyaltyNote');
+     if(note) note.textContent=levelWanted?('Mostrando '+filtered.length+' de '+total+' clientes.'):(total>LOYALTY_TABLE_LIMIT?('Mostrando los '+LOYALTY_TABLE_LIMIT+' clientes con mayor puntaje de '+total+'.'):'');
+   }
  }
 
  function render(){
@@ -1169,7 +1343,7 @@ function initReports(){
    if(t1) t1.textContent='Ingresos y egresos por '+modeWord;
    if(t2) t2.textContent='Entradas y salidas de vehículos por '+modeWord;
    drawLineChart('reportDailyChart',labels,[
-     {name:'Ingresos',color:'#33c17a',values:chartData.map(d=>d.ingresos)},
+     {name:'Ingresos',color:'#33c17a',highlight:true,values:chartData.map(d=>d.ingresos)},
      {name:'Egresos',color:'#e0554a',values:chartData.map(d=>d.egresos)}
    ],{tooltipLabels:tipLabels,formatY:fmtAxisMoney,formatTooltip:v=>money(v)});
    drawLineChart('reportVehiclesChart',labels,[
@@ -1184,6 +1358,14 @@ function initReports(){
      tb.querySelectorAll('.viewClosing').forEach(b=>b.onclick=()=>{const item=closuresArr.find(x=>String(x.id)===String(b.dataset.id)); if(item) showClosingDetail(item)});
      tb.querySelectorAll('.downloadClosing').forEach(b=>b.onclick=()=>{const item=closuresArr.find(x=>String(x.id)===String(b.dataset.id)); if(item) downloadClosingDetail(item)});
    }
+
+   // Fidelidad: siempre desde el día uno hasta hoy, sin depender del filtro Hoy/Semana/Mes/Año/Total.
+   const loyEntries=allEntries.filter(e=>parseFPDate(e.entradaFecha));
+   const loyNow=new Date();
+   const loyConfirmed=new Map();
+   get('fp_monthly_extra_charges',[]).forEach(x=>{if(x&&x.confirmed&&x.entryId!=null)loyConfirmed.set(String(x.entryId),true)});
+   const loySales=allEntries.filter(e=>e.salidaFecha&&!e.pendingMonthlyConfirmation);
+   renderLoyalty(loyEntries,loySales,loyNow);
 
    window.__fpReportSnapshot={
      periodLabel:periodLabel(from,to),
@@ -1223,7 +1405,7 @@ function initReports(){
  window.addEventListener('resize',debounceReportRender);
  window.__fpReportRender=render;
 
- if(!fromEl.value&&!toEl.value&&weekBtn) weekBtn.click(); else render();
+ if(!fromEl.value&&!toEl.value&&todayBtn) todayBtn.click(); else render();
 }
 let __reportResizeTimer=null;
 function debounceReportRender(){clearTimeout(__reportResizeTimer);__reportResizeTimer=setTimeout(()=>{if(document.body.dataset.module==='reports'&&window.__fpReportRender) window.__fpReportRender()},200)}
@@ -1462,6 +1644,17 @@ function nextMonthlyReceipt(){
 }
 
 function monthlyPaymentLabel(m){return m==='cash'?'Efectivo':m==='nequi'?'Nequi':'Efectivo + Nequi'}
+/* Normaliza una hora escrita de varias formas ("19:00", "7pm", "7:00 PM", "7 p. m.", "19") a "HH:MM". Devuelve '' si no es válida. */
+function normalizeHHMM(v){
+  const t=String(v==null?'':v).trim().toLowerCase().replace(/\./g,'').replace(/\s+/g,'');
+  const m=t.match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?(am|pm)?h?$/);
+  if(!m)return '';
+  let h=+m[1];const mi=+(m[2]||0);
+  if(m[3]==='pm'&&h<12)h+=12;
+  if(m[3]==='am'&&h===12)h=0;
+  if(h>23||mi>59)return '';
+  return String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0');
+}
 function normHeader(h){return String(h||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
 function detectCSVDelimiter(text){
   const firstLine=String(text||'').split(/\r\n|\r|\n/,1)[0]||'';
@@ -1499,33 +1692,33 @@ function fmt24(x){const d=x instanceof Date?x:new Date(x);if(isNaN(d))return '';
 function fmtDateEs(s){const d=new Date(String(s||'')+'T00:00:00');if(isNaN(d))return String(s||'');const p=n=>String(n).padStart(2,'0');return p(d.getDate())+'-'+p(d.getMonth()+1)+'-'+d.getFullYear()}
 /* Normaliza una placa para compararla: mayúsculas y sin espacios ni guiones (igual que en Entradas). */
 function normPlateKey(v){return String(v==null?'':v).trim().toUpperCase().replace(/[\s-]/g,'')}
-function monthlyEndWithGrace(m){const end=new Date((m.end||'')+'T00:00:00');if(isNaN(end))return null;end.setHours(23,59,59,999);end.setDate(end.getDate()+3);return end}
-/* Estado del plazo de 3 días de gracia respecto a m.end, sin importar si la mensualidad
- * está "pendiente de pago" (nunca se ha pagado), en abono quincenal pendiente, o ya activa.
- * 'ok' = todavía dentro del período vigente; 'grace' = vencida pero dentro de los 3 días de
- * gracia; 'expired' = superó el plazo de 3 días y ya no debe permitir registrar el pago. */
+/* Estado respecto a m.end: 'ok' = dentro del período vigente; 'grace' = vencida, en mora. Ya no hay
+ * límite de días de mora: nunca se bloquea el pago por haber pasado "demasiado" tiempo. */
 function monthlyGraceState(m){
   const end=new Date((m.end||'')+'T00:00:00'); if(isNaN(end))return 'ok';
   end.setHours(0,0,0,0);
   const today=new Date(); today.setHours(0,0,0,0);
-  const grace=new Date(end); grace.setDate(grace.getDate()+3);
-  if(today>grace)return 'expired';
-  if(today>end)return 'grace';
-  return 'ok';
+  return today>end?'grace':'ok';
+}
+/* Días de mora (0 si no está vencida). */
+function monthlyMoraDays(m){
+  const end=new Date((m.end||'')+'T00:00:00'); if(isNaN(end))return 0;
+  end.setHours(0,0,0,0);
+  const today=new Date(); today.setHours(0,0,0,0);
+  return Math.max(0,Math.round((today-end)/86400000));
 }
 function monthlyRenewalDates(m){
   const today=new Date(); today.setHours(0,0,0,0);
   const end=new Date((m.end||'')+'T00:00:00'); end.setHours(0,0,0,0);
   if(isNaN(end))return null;
   const dayBefore=new Date(end);dayBefore.setDate(dayBefore.getDate()-1);
-  const graceEnd=new Date(end);graceEnd.setDate(graceEnd.getDate()+3);
   if(today<dayBefore)return {allowed:false,reason:'La renovación se puede hacer un día antes de la fecha de vencimiento.'};
-  if(today>graceEnd)return {allowed:false,reason:'La mensualidad superó el plazo de 3 días para confirmar el pago.'};
   const start=new Date(end);
   const nextMonth=addCalendarMonthsDate(fmtDateOnly(start),1);
   return {allowed:true,start:fmtDateOnly(start),end:fmtDateOnly(nextMonth)};
 }
 
+const MONTHLY_RECEIPT_CSS=`@page{size:50mm auto;margin:0}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:50mm;max-width:50mm;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:"Times New Roman",Times,serif;font-size:10.5px;line-height:1.18;font-weight:600;text-rendering:geometricPrecision}.receipt{width:48mm;max-width:48mm;margin:0 auto;padding:1mm 1.5mm;font-family:"Times New Roman",Times,serif;font-size:10.5px;line-height:1.18;font-weight:600;overflow:visible}.arial span{font-family:Arial,Helvetica,sans-serif!important;font-size:calc(1em - 1px)!important;font-weight:normal!important}.business{line-height:1.3;text-align:center;margin:0 0 4px;font-size:10.5px;font-weight:600;overflow:visible;word-break:normal;overflow-wrap:break-word}.business b{display:block;font-size:14px;font-weight:700;letter-spacing:.3px;margin-bottom:3px}.bizinfo{display:block;font-size:12.5px;font-weight:700;line-height:1.25}.divider{width:100%;border:0;border-top:1px dashed #000;height:0;margin:5px 0}.divider.hours-divider{margin:0 0 3px}.main{line-height:1.3;text-align:left;font-size:14px;font-weight:600}.receipt-type{text-align:center;font-size:11.5px;font-weight:700;margin:0 0 4px}.row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;width:100%;margin:0 0 2px;gap:1px 4px}.row b{font-weight:600;white-space:nowrap;flex:0 0 auto}.row span{margin-left:auto;text-align:right;white-space:normal;overflow-wrap:break-word;word-break:break-word;flex:1 1 auto;min-width:0}.row.total{margin-top:3px;padding-top:3px;border-top:1px dashed #000;font-size:12.5px}.row.total b,.row.total span{font-weight:700}.hours{line-height:1.3;text-align:center;white-space:pre-line;padding:0;font-size:13px;font-weight:600}.hours-title{display:block;font-weight:700;font-size:13px;margin-bottom:3px}`;
 function printMonthlyReceipt(m,pay){
   const c=get(KEY.config,defaults.config)||{};
   const L=(k,def)=>String(c[k]??def);
@@ -1546,7 +1739,35 @@ function printMonthlyReceipt(m,pay){
   const discountRows=discountAmount>0?(row('Valor original',money(pay.originalValue||m.value||0),'arial')+row('Descuento','-'+money(discountAmount),'arial')):'';
   const businessBlock=showBusiness?`<div class="business"><b>${escP(business)}</b>${nit?`<span class="bizinfo">${escP(L('monthlyLabelNit','NIT.'))} ${escP(nit)}</span>`:''}${phone?`<span class="bizinfo">${escP(L('monthlyLabelPhone','TEL.'))} ${escP(phone)}</span>`:''}${address?`<span class="bizinfo">${escP(L('monthlyLabelAddress','DIR.'))} ${escP(address)}</span>`:''}</div><div class="divider"></div>`:'';
   const mainRows=`<div class="receipt-type">MENSUALIDAD</div>${row(L('monthlyLabelReceipt','Recibo'),receipt,'arial')}${row(L('monthlyLabelClient','Cliente'),client,'arial')}${showDocument?row(L('monthlyLabelDocument','Teléfono'),document,'arial'):''}${row(L('monthlyLabelVehicle','Vehículo'),vehicle,'arial')}${row(L('monthlyLabelPlate','Placa'),plate,'arial')}${row(L('monthlyLabelPaymentDate','Fecha de pago'),fmt24(pay.dateTime),'arial')}${row(L('monthlyLabelStart','Inicio'),fmtDateEs(m.start||m.periodStart),'arial')}${row(L('monthlyLabelEnd','Vence'),fmtDateEs(m.end||m.periodEnd),'arial')}${discountRows}${row(L('monthlyLabelValue','Valor'),total,'total arial')}${row(L('monthlyLabelPaymentMethod','Forma de pago'),method,'arial')}`;
-  const html=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${escP(receipt)}</title><style>@page{size:50mm auto;margin:0}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:50mm;max-width:50mm;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:"Times New Roman",Times,serif;font-size:10.5px;line-height:1.18;font-weight:600;text-rendering:geometricPrecision}.receipt{width:48mm;max-width:48mm;margin:0 auto;padding:1mm 1.5mm;font-family:"Times New Roman",Times,serif;font-size:10.5px;line-height:1.18;font-weight:600;overflow:visible}.arial span{font-family:Arial,Helvetica,sans-serif!important;font-size:calc(1em - 1px)!important;font-weight:normal!important}.business{line-height:1.3;text-align:center;margin:0 0 4px;font-size:10.5px;font-weight:600;overflow:visible;word-break:normal;overflow-wrap:break-word}.business b{display:block;font-size:14px;font-weight:700;letter-spacing:.3px;margin-bottom:3px}.bizinfo{display:block;font-size:12.5px;font-weight:700;line-height:1.25}.divider{width:100%;border:0;border-top:1px dashed #000;height:0;margin:5px 0}.divider.hours-divider{margin:0 0 3px}.main{line-height:1.3;text-align:left;font-size:14px;font-weight:600}.receipt-type{text-align:center;font-size:11.5px;font-weight:700;margin:0 0 4px}.row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;width:100%;margin:0 0 2px;gap:1px 4px}.row b{font-weight:600;white-space:nowrap;flex:0 0 auto}.row span{margin-left:auto;text-align:right;white-space:normal;overflow-wrap:break-word;word-break:break-word;flex:1 1 auto;min-width:0}.row.total{margin-top:3px;padding-top:3px;border-top:1px dashed #000;font-size:12.5px}.row.total b,.row.total span{font-weight:700}.hours{line-height:1.3;text-align:center;white-space:pre-line;padding:0;font-size:13px;font-weight:600}.hours-title{display:block;font-weight:700;font-size:13px;margin-bottom:3px}</style></head><body><div class="receipt">${businessBlock}<div class="main">${mainRows}</div><div class="divider hours-divider"></div><div class="hours"><div class="hours-title">HORARIOS DE ATENCIÓN</div>${escP(hours)}</div></div><script>window.onload=function(){window.print();setTimeout(function(){window.close()},300)};<\/script></body></html>`;
+  const html=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${escP(receipt)}</title><style>${MONTHLY_RECEIPT_CSS}</style></head><body><div class="receipt">${businessBlock}<div class="main">${mainRows}</div><div class="divider hours-divider"></div><div class="hours"><div class="hours-title">HORARIOS DE ATENCIÓN</div>${escP(hours)}</div></div><script>window.onload=function(){window.print();setTimeout(function(){window.close()},300)};<\/script></body></html>`;
+  const w=window.open('','_blank','width=420,height=700');
+  if(!w){fpAlert('El navegador bloqueó la ventana de impresión. Permita ventanas emergentes para FacaParking.','error');return;}
+  w.document.open();w.document.write(html);w.document.close();
+}
+
+/* Recibo de COBRO PENDIENTE de una mensualidad (para entregárselo al cliente).
+ * No registra ningún pago ni consume consecutivo: solo imprime lo que debe pagar. */
+function printMonthlyPendingReceipt(m){
+  const c=get(KEY.config,defaults.config)||{};
+  const L=(k,def)=>String(c[k]??def);
+  const showBusiness=c.monthlyShowBusiness===undefined?true:!!c.monthlyShowBusiness;
+  const business=c.razon_social||c.parkingName||'FACAPARKING';
+  const nit=c.receiptNit??c.nit??'', phone=c.receiptPhone??c.telefonos??c.phone??'', address=c.receiptAddress??c.direccion1??c.address??'';
+  const escP=x=>String(x??'').replace(/[&<>]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
+  const row=(label,val,cls='')=>String(val||'').trim()?`<div class="row ${cls}"><b>${escP(label)}</b><span>${escP(val)}</span></div>`:'';
+  // Mismo período que cobraría "Pagar mensualidad" (payMonthly).
+  let d;
+  if(m.installment) d={start:m.installment.targetStart,end:m.installment.targetEnd};
+  else{ const rd=monthlyRenewalDates(m); d=(rd&&rd.allowed)?rd:{start:m.start,end:m.end}; }
+  const fullValue=+m.value||0;
+  const paid=m.installment?(+m.installment.paid||0):0;
+  const due=m.installment?Math.max(0,(+m.installment.total||fullValue)-paid):fullValue;
+  const extra=get('fp_monthly_extra_charges',[]).filter(x=>String(x.monthlyId)===String(m.id) && x.confirmed!==true).reduce((a,x)=>a+(+x.amount||0),0);
+  const plate=String(m.plate||m.placa||'').trim().toUpperCase();
+  const businessBlock=showBusiness?`<div class="business"><b>${escP(business)}</b>${nit?`<span class="bizinfo">${escP(L('monthlyLabelNit','NIT.'))} ${escP(nit)}</span>`:''}${phone?`<span class="bizinfo">${escP(L('monthlyLabelPhone','TEL.'))} ${escP(phone)}</span>`:''}${address?`<span class="bizinfo">${escP(L('monthlyLabelAddress','DIR.'))} ${escP(address)}</span>`:''}</div><div class="divider"></div>`:'';
+  const installRows=m.installment?(row('Valor total',money(m.installment.total||fullValue),'arial')+row('Abonado',money(paid),'arial')):'';
+  const mainRows=`<div class="receipt-type">MENSUALIDAD</div><div class="receipt-type">PAGO PENDIENTE</div>${row('Fecha',fmt24(new Date()),'arial')}${row(L('monthlyLabelClient','Cliente'),m.name||m.client||m.clientName||'','arial')}${row(L('monthlyLabelVehicle','Vehículo'),m.vehicle||'','arial')}${row(L('monthlyLabelPlate','Placa'),plate,'arial')}${row(L('monthlyLabelStart','Inicio'),fmtDateEs(d.start),'arial')}${row(L('monthlyLabelEnd','Vence'),fmtDateEs(d.end),'arial')}${installRows}${extra>0?row('Cargos fuera de horario',money(extra),'arial'):''}${row(m.installment?'Saldo a pagar':'Valor a pagar',money(due),'total arial')}`;
+  const html=`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Pago pendiente ${escP(plate)}</title><style>${MONTHLY_RECEIPT_CSS}</style></head><body><div class="receipt">${businessBlock}<div class="main">${mainRows}</div></div><script>window.onload=function(){window.print();setTimeout(function(){window.close()},300)};<\/script></body></html>`;
   const w=window.open('','_blank','width=420,height=700');
   if(!w){fpAlert('El navegador bloqueó la ventana de impresión. Permita ventanas emergentes para FacaParking.','error');return;}
   w.document.open();w.document.write(html);w.document.close();
@@ -1693,6 +1914,16 @@ function initMonthly(){
     const createCard=document.getElementById('monthlyCreateCard'); if(createCard)createCard.style.display='none';
     const migrateCard=document.getElementById('monthlyMigrateCard'); if(migrateCard)migrateCard.style.display='none';
   }
+  // El formulario de registro/edición está oculto por defecto: se muestra con el botón
+  // "Nueva mensualidad" (alta) o con el botón de editar de cada fila (edición).
+  const newMonthlyBtn=document.getElementById('newMonthlyBtn'), createCardEl=document.getElementById('monthlyCreateCard');
+  if(!isAdmin&&newMonthlyBtn)newMonthlyBtn.style.display='none';
+  function showMonthlyForm(on,editing){
+    if(!createCardEl||!isAdmin)return;
+    createCardEl.style.display=on?'':'none';
+    const t=createCardEl.querySelector('.card-title'); if(t)t.textContent=editing?'Editar mensualidad':'Registrar mensualidad';
+    if(on)window.scrollTo({top:createCardEl.getBoundingClientRect().top+window.scrollY-80,behavior:'smooth'});
+  }
   function syncExpired(){
     // Se relee del almacenamiento antes de calcular: si esta pantalla llevaba mucho tiempo abierta (o hubo
     // cambios desde otra ventana) ya no se sobrescribe lo guardado con una copia vieja. Solo se escribe si algo cambió.
@@ -1704,7 +1935,7 @@ function initMonthly(){
     const q2=(search?.value||'').trim().toLowerCase(), fromEl=document.getElementById('monthlyFrom'), toEl=document.getElementById('monthlyTo'), methodEl=document.getElementById('monthlyPaymentFilter');
     const fromVal=fromEl?.value||'', toVal=toEl?.value||'', methodVal=methodEl?.value||'';
     return payments.slice().reverse().filter(p=>{
-      const hay=JSON.stringify(p).toLowerCase(), day=String(p.dateTime||'').slice(0,10), pm=String(p.paymentMethod||'cash');
+      const hay=JSON.stringify(p).toLowerCase(), day=(()=>{const d=parseFPDate(p.dateTime);return d?fmtDateOnly(d):String(p.dateTime||'').slice(0,10)})(), pm=String(p.paymentMethod||'cash');
       return (!q2||hay.includes(q2))&&(!fromVal||day>=fromVal)&&(!toVal||day<=toVal)&&(!methodVal||pm===methodVal);
     });
   }
@@ -1744,24 +1975,28 @@ function initMonthly(){
   function monthlyExtraChargesTotal(monthlyId){return get('fp_monthly_extra_charges',[]).filter(x=>String(x.monthlyId)===String(monthlyId) && x.confirmed!==true).reduce((a,x)=>a+(+x.amount||0),0)}
   function statusOf(m){
     if(m.pendingConfirmation)return 'Pendiente de confirmar pago';
+    const md=monthlyMoraDays(m), mora=md>0?('En mora ('+md+' d)'):'';
     if(String(m.paymentStatus||'').toLowerCase()==='pending' && !m.installment){
-      const gs=monthlyGraceState(m);
-      if(gs==='expired')return 'Vencido — superó el plazo de 3 días sin pagar';
-      if(gs==='grace')return 'Pendiente de pago — Gracia 3 días';
-      return 'Pendiente de pago';
+      return mora?('Pendiente de pago — '+mora):'Pendiente de pago';
     }
     if(m.installment){
-      const pend=Math.max(0,(+m.installment.total||0)-(+m.installment.paid||0)),gs=monthlyGraceState(m),base='Quincenal: abonado '+money(m.installment.paid||0)+' — pendiente '+money(pend);
-      if(gs==='expired')return 'Vencido — '+base;
-      if(gs==='grace')return base+' (Gracia 3 días)';
-      return base;
+      const pend=Math.max(0,(+m.installment.total||0)-(+m.installment.paid||0)),base='Quincenal: abonado '+money(m.installment.paid||0)+' — pendiente '+money(pend);
+      return mora?(base+' ('+mora+')'):base;
     }
-    const today=new Date();today.setHours(0,0,0,0);const end=new Date((m.end||'')+'T00:00:00');if(isNaN(end))return 'Sin fecha';end.setHours(0,0,0,0);const grace=new Date(end);grace.setDate(grace.getDate()+3);if(today>end&&today<=grace)return 'Gracia 3 días';if(today>=end){if(today.getTime()===end.getTime())return 'Vence hoy';return 'Vencido'}const before=new Date(end);before.setDate(before.getDate()-1);return today.getTime()===before.getTime()?'Renovación permitida':'Activo'}
+    const today=new Date();today.setHours(0,0,0,0);const end=new Date((m.end||'')+'T00:00:00');if(isNaN(end))return 'Sin fecha';end.setHours(0,0,0,0);
+    if(today>end)return mora;
+    if(today.getTime()===end.getTime())return 'Vence hoy';
+    const before=new Date(end);before.setDate(before.getDate()-1);return today.getTime()===before.getTime()?'Renovación permitida':'Activo'}
   function statusCategory(m){
     if(m.pendingConfirmation)return 'pending';
-    if(String(m.paymentStatus||'').toLowerCase()==='pending' || m.installment)return monthlyGraceState(m)==='expired'?'expired':'pending';
     const today=new Date();today.setHours(0,0,0,0);
-    const end=new Date((m.end||'')+'T00:00:00');if(isNaN(end))return 'active';
+    const end=new Date((m.end||'')+'T00:00:00');
+    if(String(m.paymentStatus||'').toLowerCase()==='pending' || m.installment){
+      // Pendiente de pago: si ya pasó la fecha de fin está en mora (Vencidas); si no, sigue como pendiente.
+      if(!isNaN(end)){end.setHours(0,0,0,0);if(today>end)return 'expired';}
+      return 'pending';
+    }
+    if(isNaN(end))return 'active';
     end.setHours(0,0,0,0);
     if(today>=end)return 'expired';
     const before=new Date(end);before.setDate(before.getDate()-1);
@@ -1782,18 +2017,16 @@ function initMonthly(){
     const today=new Date(); today.setHours(0,0,0,0);
     return today<dayBefore;
   }
-  function render(){syncExpired();let q=(searchLegacy?.value||'').toLowerCase(),sf=statusFilter?.value||'';let filteredMonthly=data.map((x,i)=>({x,i})).filter(o=>(!sf||statusCategory(o.x)===sf)&&JSON.stringify(o.x).toLowerCase().includes(q));let pagesM=Math.max(1,Math.ceil(filteredMonthly.length/pageSize));if(page>pagesM)page=pagesM;let pageItemsM=filteredMonthly.slice((page-1)*pageSize,page*pageSize);tb.innerHTML=pageItemsM.map(o=>{let x=o.x,rd=monthlyRenewalDates(x),notExpired=monthlyGraceState(x)!=='expired',pendingPayment=String(x.paymentStatus||'').toLowerCase()==='pending',canPay=!x.pendingConfirmation&&!x.nextPeriod&&(((pendingPayment||x.installment)&&notExpired)||(rd&&rd.allowed)),canPrepay=monthlyCanPrepay(x),extra=monthlyExtraChargesTotal(x.id||('M'+o.i));return `<tr><td>${String(x.document||'').split(/[,;\n]+/).map(t=>esc(t.trim())).filter(Boolean).join('<br>')}</td><td>${esc(x.name)}</td><td>${esc(String(x.plate||'').toUpperCase())}</td><td>${esc(x.vehicle)}</td><td>${esc(fmtDateEs(x.start))}</td><td>${esc(fmtDateEs(x.end))}${x.nextPeriod?'<br><small style="color:#1f7a4d">Adelanto pagado → vence '+esc(fmtDateEs(x.nextPeriod.end))+'</small>':''}</td><td>${money(x.value)}</td><td>${esc(monthlyScheduleDetail(x))}</td><td>${extra>0?money(extra):'—'}</td><td>${esc(statusOf(x))}</td><td>${isAdmin?`<button type=\"button\" class=\"btn btn-sm btn-warning editMonthly\" data-i=\"${o.i}\">Editar</button>`:''} ${isAdmin&&x.pendingConfirmation?`<button type=\"button\" class=\"btn btn-sm btn-success confirmMigration\" data-i=\"${o.i}\">Confirmar pago</button>`:''} ${canPay?`<button type=\"button\" class=\"btn btn-sm btn-primary renewMonthly\" data-i=\"${o.i}\">${x.installment?'Completar pago quincenal':'Pagar mensualidad'}</button>`:''} ${canPrepay?`<button type=\"button\" class=\"btn btn-sm btn-default payAdvance\" data-i=\"${o.i}\" title=\"Pagar el siguiente período por adelantado; no arranca hasta que venza el actual\">Pagar por adelantado</button>`:''} ${isAdmin?`<button type=\"button\" class=\"btn btn-sm btn-danger delMonthly\" data-i=\"${o.i}\">Eliminar</button>`:''}</td></tr>`}).join('')||'<tr><td colspan="11">No hay mensualidades registradas.</td></tr>';
+  function render(){syncExpired();let q=(searchLegacy?.value||'').toLowerCase(),sf=statusFilter?.value||'';let filteredMonthly=data.map((x,i)=>({x,i})).filter(o=>(!sf||statusCategory(o.x)===sf)&&JSON.stringify(o.x).toLowerCase().includes(q));let pagesM=Math.max(1,Math.ceil(filteredMonthly.length/pageSize));if(page>pagesM)page=pagesM;let pageItemsM=filteredMonthly.slice((page-1)*pageSize,page*pageSize);tb.innerHTML=pageItemsM.map(o=>{let x=o.x,rd=monthlyRenewalDates(x),pendingPayment=String(x.paymentStatus||'').toLowerCase()==='pending',canPay=!x.pendingConfirmation&&!x.nextPeriod&&((pendingPayment||x.installment)||(rd&&rd.allowed)),canPrepay=monthlyCanPrepay(x),extra=monthlyExtraChargesTotal(x.id||('M'+o.i));return `<tr><td>${String(x.document||'').split(/[,;\n]+/).map(t=>esc(t.trim())).filter(Boolean).join('<br>')}</td><td>${esc(x.name)}</td><td>${esc(String(x.plate||'').toUpperCase())}</td><td>${esc(x.vehicle)}</td><td>${esc(fmtDateEs(x.start))}</td><td>${esc(fmtDateEs(x.end))}${x.nextPeriod?'<br><small style="color:#1f7a4d">Adelanto pagado → vence '+esc(fmtDateEs(x.nextPeriod.end))+'</small>':''}</td><td>${money(x.value)}</td><td>${esc(monthlyScheduleDetail(x))}</td><td>${extra>0?money(extra):'—'}</td><td>${esc(statusOf(x))}</td><td>${isAdmin?`<button type=\"button\" class=\"btn btn-sm btn-warning editMonthly\" data-i=\"${o.i}\">Editar</button>`:''} ${isAdmin&&x.pendingConfirmation?`<button type=\"button\" class=\"btn btn-sm btn-success confirmMigration\" data-i=\"${o.i}\">Confirmar pago</button>`:''} ${canPay?`<button type=\"button\" class=\"btn btn-sm btn-default printPendingMonthly\" data-i=\"${o.i}\" title=\"Imprimir recibo de pago pendiente\"><svg class=\"fp-print-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" style=\"width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;vertical-align:-2px;margin-right:4px\"><path d=\"M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z\"/></svg>Imprimir</button>`:''} ${canPay?`<button type=\"button\" class=\"btn btn-sm btn-primary renewMonthly\" data-i=\"${o.i}\">${x.installment?'Completar pago quincenal':'Pagar mensualidad'}</button>`:''} ${canPrepay?`<button type=\"button\" class=\"btn btn-sm btn-default payAdvance\" data-i=\"${o.i}\" title=\"Pagar el siguiente período por adelantado; no arranca hasta que venza el actual\">Pagar por adelantado</button>`:''} ${isAdmin?`<button type=\"button\" class=\"btn btn-sm btn-danger delMonthly\" data-i=\"${o.i}\">Eliminar</button>`:''}</td></tr>`}).join('')||'<tr><td colspan="11">No hay mensualidades registradas.</td></tr>';
     const monthlyPagerEl=document.getElementById('monthlyPager');
     if(monthlyPagerEl){
-      let numsM='';const maxBtnsM=5;let startM=Math.max(1,page-2),endM=Math.min(pagesM,startM+maxBtnsM-1);startM=Math.max(1,endM-maxBtnsM+1);
-      for(let n=startM;n<=endM;n++)numsM+=`<button type="button" class="${n===page?'active':''}" data-page="${n}">${n}</button>`;
-      monthlyPagerEl.innerHTML=`<button type="button" data-page="prev" ${page<=1?'disabled':''}>‹ Anterior</button>${numsM}<button type="button" data-page="next" ${page>=pagesM?'disabled':''}>Siguiente ›</button><span class="fp-page-count">Mostrando ${filteredMonthly.length?((page-1)*pageSize+1):0} a ${Math.min(page*pageSize,filteredMonthly.length)} de ${filteredMonthly.length} mensualidades</span>`;
-      monthlyPagerEl.querySelectorAll('button').forEach(b=>b.onclick=()=>{const v=b.dataset.page;if(v==='prev'&&page>1)page--;else if(v==='next'&&page<pagesM)page++;else if(!isNaN(+v))page=+v;render();});
+      fpPager(monthlyPagerEl,page,pagesM,filteredMonthly.length,'mensualidad|mensualidades',p=>{page=p;render()});
     }
     tb.querySelectorAll('.confirmMigration').forEach(b=>b.onclick=()=>{if(!isAdmin){fpAlert('Solo el Administrador puede confirmar el pago de una mensualidad migrada.','error');return;}let m=data[+b.dataset.i];fpConfirm('¿Confirmar que la mensualidad de '+String(m.plate||'').toUpperCase()+' ya fue pagada por fuera del sistema?\nQuedará activa hasta '+fmtDateEs(m.end)+'.',()=>{m.pendingConfirmation=false;m.active=true;m.confirmedAt=new Date().toISOString();m.confirmedBy=(get(KEY.user,defaults.user)||{}).name||'Usuario';set('fp_monthly',data);render();fpAlert('Pago confirmado. La mensualidad de '+String(m.plate||'').toUpperCase()+' queda activa.');},{okText:'Confirmar'});});
-    tb.querySelectorAll('.editMonthly').forEach(b=>b.onclick=()=>{if(!isAdmin){fpAlert('Solo el Administrador puede modificar mensualidades.','error');return;}let m=data[+b.dataset.i];['document','name','plate','vehicle','value','start','end'].forEach(k=>{if(f.elements[k])f.elements[k].value=m[k]??''});if(f.elements.schedule)f.elements.schedule.value=String(m.schedule||'day').toLowerCase()==='night'?'night':'day';if(f.elements.nightEntryLimit)f.elements.nightEntryLimit.value=m.nightEntryLimit||'';if(f.elements.nightExitLimit)f.elements.nightExitLimit.value=m.nightExitLimit||'';toggleScheduleFields();phonesLoad();if(f.elements.active)f.elements.active.checked=m.active!==false;if(f.elements.biweekly)f.elements.biweekly.checked=!!m.biweekly;f.dataset.i=b.dataset.i;window.scrollTo({top:f.getBoundingClientRect().top+window.scrollY-80,behavior:'smooth'});});
+    tb.querySelectorAll('.editMonthly').forEach(b=>b.onclick=()=>{if(!isAdmin){fpAlert('Solo el Administrador puede modificar mensualidades.','error');return;}let m=data[+b.dataset.i];['document','name','plate','vehicle','value','start','end'].forEach(k=>{if(f.elements[k])f.elements[k].value=m[k]??''});if(f.elements.schedule)f.elements.schedule.value=String(m.schedule||'day').toLowerCase()==='night'?'night':'day';if(f.elements.nightEntryLimit)f.elements.nightEntryLimit.value=normalizeHHMM(m.nightEntryLimit);if(f.elements.nightExitLimit)f.elements.nightExitLimit.value=normalizeHHMM(m.nightExitLimit);toggleScheduleFields();phonesLoad();if(f.elements.active)f.elements.active.checked=m.active!==false;if(f.elements.biweekly)f.elements.biweekly.checked=!!m.biweekly;f.dataset.i=b.dataset.i;showMonthlyForm(true,true);});
     tb.querySelectorAll('.delMonthly').forEach(b=>b.onclick=()=>{if(!isAdmin){fpAlert('Solo el Administrador puede eliminar mensualidades.','error');return;}fpConfirm('¿Eliminar esta mensualidad?',()=>{data.splice(+b.dataset.i,1);set('fp_monthly',data);render()},{danger:true,okText:'Eliminar'});});
     tb.querySelectorAll('.renewMonthly').forEach(b=>b.onclick=()=>payMonthly(+b.dataset.i));
+    tb.querySelectorAll('.printPendingMonthly').forEach(b=>b.onclick=()=>{const mm=data[+b.dataset.i]; if(mm) printMonthlyPendingReceipt(mm)});
     tb.querySelectorAll('.payAdvance').forEach(b=>b.onclick=()=>payMonthlyAdvance(+b.dataset.i));
     if(payTb){
       const pages=Math.max(1,Math.ceil(filteredPayments().length/payPageSize)); if(payPage>pages)payPage=pages;
@@ -1801,7 +2034,7 @@ function initMonthly(){
       const pageRows=rows.slice((payPage-1)*payPageSize,payPage*payPageSize);
       payTb.innerHTML=pageRows.map(p=>`<tr><td><strong>${esc(p.receiptPrefix||'FM')}${esc(p.receiptNumber||'')}</strong></td><td><strong>${esc(String(p.plate||'').toUpperCase())}</strong></td><td>${esc(fmtDateEs(p.periodStart))}</td><td>${esc(fmtDateEs(p.periodEnd))}</td><td>${money(p.value)}</td><td>${esc(monthlyPaymentLabel(p.paymentMethod||'cash'))}</td><td>${money(p.cashAmount||0)}</td><td>${money(p.nequiAmount||0)}</td><td>${esc(fmt24(p.dateTime))}</td><td>${esc(p.user||'')}</td><td><button type="button" class="btn btn-sm printMonthlyPayment" data-id="${esc(p.id)}" title="Imprimir recibo"><svg class="fp-print-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg></button></td></tr>`).join('')||'<tr><td colspan="11">No hay pagos de mensualidades registrados.</td></tr>';
       payTb.querySelectorAll('.printMonthlyPayment').forEach(b=>b.onclick=()=>{let p=payments.find(x=>String(x.id)===String(b.dataset.id));if(!p)return;let m=data.find(x=>String(x.id)===String(p.monthlyId))||{plate:p.plate,name:p.client,document:p.document||'',vehicle:p.vehicle,start:p.periodStart,end:p.periodEnd,value:p.value};printMonthlyReceipt(m,p)});
-      if(payPager){let nums='';const maxBtns=5;let start=Math.max(1,payPage-2),end=Math.min(pages,start+maxBtns-1);start=Math.max(1,end-maxBtns+1);for(let n=start;n<=end;n++)nums+=`<button type="button" class="${n===payPage?'active':''}" data-page="${n}">${n}</button>`;payPager.innerHTML=`<button type="button" data-page="prev" ${payPage<=1?'disabled':''}>‹ Anterior</button>${nums}<button type="button" data-page="next" ${payPage>=pages?'disabled':''}>Siguiente ›</button><span class="fp-page-count">Mostrando ${rows.length?((payPage-1)*payPageSize+1):0} a ${Math.min(payPage*payPageSize,rows.length)} de ${rows.length} pagos</span>`;payPager.querySelectorAll('button').forEach(b=>b.onclick=()=>{const v=b.dataset.page;if(v==='prev'&&payPage>1)payPage--;else if(v==='next'&&payPage<pages)payPage++;else if(!isNaN(+v))payPage=+v;render();});}
+      if(payPager){fpPager(payPager,payPage,pages,rows.length,'pago|pagos',p=>{payPage=p;render()});}
     }
   }
   function payMonthly(i){
@@ -1811,13 +2044,11 @@ function initMonthly(){
     let d;
     const pendingPayment=String(m.paymentStatus||'').toLowerCase()==='pending';
     if(installment){
-      if(monthlyGraceState(m)==='expired'){fpAlert('Esta mensualidad superó el plazo de 3 días para completar el segundo abono quincenal. Edite la mensualidad (actualice las fechas) o elimínela y regístrela de nuevo.','error');return;}
       d={start:installment.targetStart,end:installment.targetEnd,allowed:true};
     }
     else if(pendingPayment){
-      if(monthlyGraceState(m)==='expired'){fpAlert('Esta mensualidad superó el plazo de 3 días para registrar el primer pago. Edite la mensualidad (actualice las fechas) o elimínela y regístrela de nuevo.','error');return;}
       // Si el pago llega dentro de la ventana de renovación (desde 1 día antes del vencimiento
-      // hasta 3 días después), se renueva al período siguiente igual que una mensualidad ya
+      // en adelante, sin límite de días de mora), se renueva al período siguiente igual que una mensualidad ya
       // pagada: inicio = vencimiento actual, fin = un mes después. Antes, una mensualidad que
       // seguía como "pendiente" cobraba siempre el período registrado (m.start–m.end), y al
       // pagar el día antes del vencimiento quedaba con fecha fin = hoy ("Vence hoy") y con el
@@ -1950,6 +2181,7 @@ function initMonthly(){
       f.reset();
       f.elements.active.checked=true;
       toggleScheduleFields();
+      showMonthlyForm(false);
       render();
       fpAlert('Mensualidad registrada. Quedó pendiente de pago y no generó ninguna venta ni movimiento de caja.');
       return;
@@ -1972,9 +2204,10 @@ function initMonthly(){
     // pendiente de pago pasaba a verse como "Activo" y el botón "Pagar mensualidad"
     // desaparecía sin que el cliente hubiera pagado.
     const x={...old,document:f.document.value.trim(),name,plate,vehicle,start,end,value,schedule:editSchedule,nightEntryLimit:editNightEntryLimit,nightExitLimit:editNightExitLimit,active:f.elements.active.checked,biweekly:!!(f.elements.biweekly&&f.elements.biweekly.checked),installment:old.installment,origen:old.origen||'registro',createdAt:old.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
-    data[idx]=x;set('fp_monthly',data);delete f.dataset.i;f.reset();f.elements.active.checked=true;toggleScheduleFields();render();fpAlert('Mensualidad guardada correctamente.');
+    data[idx]=x;set('fp_monthly',data);delete f.dataset.i;f.reset();f.elements.active.checked=true;toggleScheduleFields();showMonthlyForm(false);render();fpAlert('Mensualidad guardada correctamente.');
   };
-  document.getElementById('newMonthly').onclick=()=>{delete f.dataset.i;f.reset();f.elements.active.checked=true;toggleScheduleFields();};
+  document.getElementById('newMonthly').onclick=()=>{delete f.dataset.i;f.reset();f.elements.active.checked=true;toggleScheduleFields();showMonthlyForm(false);};
+  if(newMonthlyBtn)newMonthlyBtn.onclick=()=>{delete f.dataset.i;f.reset();f.elements.active.checked=true;toggleScheduleFields();showMonthlyForm(true,false);const first=f.elements.name;if(first)setTimeout(()=>first.focus(),350);};
   const reportBtn=document.getElementById('monthlyReportBtn');
   if(reportBtn)reportBtn.onclick=()=>{
     const fromVal=document.getElementById('monthlyFrom')?.value||'', toVal=document.getElementById('monthlyTo')?.value||'', methodVal=document.getElementById('monthlyPaymentFilter')?.value||'';
@@ -2013,13 +2246,13 @@ function initMonthly(){
         rows.slice(1).forEach((r,i)=>{
           const line=i+2, g=(k)=>idx[k]>=0?String(r[idx[k]]??'').trim():'';
           const nombre=g('nombre'), placa=g('placa').toUpperCase().replace(/[\s-]/g,''), documento=g('documento'), vehiculo=g('vehiculo')||'Carro', valor=parseMoneyLoose(g('valor')), venceRaw=g('vence'), inicioRaw=g('inicio');
-          const horarioRaw=normHeader(g('horario')), schedule=(horarioRaw==='night'||horarioRaw==='noche')?'night':'day', nightEntryLimit=g('horaEntrada'), nightExitLimit=g('horaSalida');
+          const horarioRaw=normHeader(g('horario')), schedule=(horarioRaw==='night'||horarioRaw==='noche')?'night':'day', nightEntryLimit=normalizeHHMM(g('horaEntrada')), nightExitLimit=normalizeHHMM(g('horaSalida'));
           const vence=parseFlexibleDate(venceRaw);
           if(!nombre){errors.push({line,reason:'falta el nombre'});return}
           if(!placa){errors.push({line,reason:'falta la placa'});return}
           if(!(valor>0)){errors.push({line,reason:'valor inválido'});return}
           if(!vence){errors.push({line,reason:'fecha_vencimiento inválida (use AAAA-MM-DD o DD/MM/AAAA)'});return}
-          if(schedule==='night'&&(!nightEntryLimit||!nightExitLimit)){errors.push({line,reason:'horario noche requiere hora_entrada y hora_salida'});return}
+          if(schedule==='night'&&(!nightEntryLimit||!nightExitLimit)){errors.push({line,reason:'horario noche requiere hora_entrada y hora_salida válidas (formato HH:MM, por ejemplo 19:00)'});return}
           if(seenPlates.has(placa)){errors.push({line,reason:'la placa '+placa+' ya tiene una mensualidad activa o pendiente de confirmar'});return}
           if(csvPlates.has(placa)){errors.push({line,reason:'placa '+placa+' repetida en el archivo'});return}
           csvPlates.add(placa);
@@ -2127,10 +2360,7 @@ function initPending(){
     });
     tb.querySelectorAll('.viewHistory').forEach(b=>b.onclick=()=>showPlateHistory(b.dataset.plate));
     if(pager){
-      const maxBtns=5; let start=Math.max(1,page-2),end=Math.min(pages,start+maxBtns-1);start=Math.max(1,end-maxBtns+1);
-      let nums=''; for(let n=start;n<=end;n++)nums+=`<button type="button" class="${n===page?'active':''}" data-page="${n}">${n}</button>`;
-      pager.innerHTML=`<button type="button" data-page="prev" ${page<=1?'disabled':''}>‹ Anterior</button>${nums}<button type="button" data-page="next" ${page>=pages?'disabled':''}>Siguiente ›</button><span class="fp-page-count">Mostrando ${rows.length?((page-1)*pageSize+1):0} a ${Math.min(page*pageSize,rows.length)} de ${rows.length} pendientes</span>`;
-      pager.querySelectorAll('button').forEach(b=>b.onclick=()=>{const v=b.dataset.page;if(v==='prev'&&page>1)page--;else if(v==='next'&&page<pages)page++;else if(!isNaN(+v))page=+v;render()});
+      fpPager(pager,page,pages,rows.length,'pendiente|pendientes',p=>{page=p;render()});
     }
   }
   // Historial de una placa: solo las entradas/salidas que SIGUEN pendientes de
@@ -2212,6 +2442,16 @@ function initPending(){
   searchEl.oninput=()=>{page=1;render()};
   render();
 }
+// Color de fila para ventas en Cierre de Caja: descuento = rojo, Nequi/electrónico = azul,
+// efectivo = verde (prioridad: descuento > forma de pago). 'both' = Efectivo + Electrónico.
+function cashRowKind(e){
+  if(+e.discountAmount>0) return 'desc';
+  const lbl=paymentLabel(e);
+  if(lbl==='Efectivo') return 'cash';
+  if(lbl==='Electrónico') return 'nequi';
+  if(lbl==='Efectivo + Electrónico') return 'both';
+  return '';
+}
 function initCash(){
  ensure();
  const R='fp_cash_register', C='fp_cash_closings', E='fp_expenses', I='fp_incomes';
@@ -2236,6 +2476,12 @@ function initCash(){
  function baseInList(reg){return get('fp_base_in',[]).filter(x=>x && (!reg || !reg.id || x.registerId===reg.id));}
  function baseOutList(reg){return get('fp_base_out',[]).filter(x=>x && (!reg || !reg.id || x.registerId===reg.id));}
  function sumAmt(a){return a.reduce((s,x)=>s+(+x.amount||0),0);}
+ // Colores suaves por fila (misma regla en la lista de Cierre de Caja y en el reporte de cierre).
+ function rowTint(e){
+   const k=cashRowKind(e);
+   if(k==='desc') return ' class="fp-cj-desc" title="Venta con descuento aplicado"';
+   return k?' class="fp-cj-'+k+'"':'';
+ }
  let page=1, pageSize=10;
  // El Empleado solo registra el valor total de dinero al cerrar caja: no ve
  // bases, ventas, efectivo esperado, movimientos ni el detalle de ventas.
@@ -2257,7 +2503,7 @@ function initCash(){
    const totalDiscounts=sales.reduce((a,x)=>a+(+x.discountAmount||0),0);
    const expected=salesCash+ig-eg;
    const bIn=sumAmt(baseInList(reg)), bOut=sumAmt(baseOutList(reg)), baseTotal=(+reg.initialCash||0)+bIn-bOut;
-   ['cashBase','cashSales','cashElectronic','cashExpenses','cashExpected'].forEach((id,i)=>{let el=document.getElementById(id); if(el)el.textContent=money([baseTotal,totalSales+ig,salesElectronic,eg,expected][i])});
+   ['cashBase','cashSales','cashElectronic','cashExpenses','cashExpected'].forEach((id,i)=>{let el=document.getElementById(id); if(el)el.textContent=money([baseTotal,totalSales,salesElectronic,eg,expected][i])});
    const bd=document.getElementById('cashBaseDetail');
    if(bd){ if(bIn||bOut){bd.style.display='block';bd.textContent='Inicial '+money(reg.initialCash||0)+(bIn?' · + '+money(bIn):'')+(bOut?' · − '+money(bOut):'');}else{bd.style.display='none';bd.textContent='';} }
    let discEl=document.getElementById('cashDiscounts');if(discEl)discEl.textContent=money(totalDiscounts);let incEl=document.getElementById('cashIncomes');if(incEl)incEl.textContent=money(ig);
@@ -2269,17 +2515,14 @@ function initCash(){
    const pages=Math.max(1,Math.ceil(sales.length/pageSize)); if(page>pages)page=pages;
    const rows=sales.slice().sort((a,b)=>(parseFPDate(b.salidaFecha)||0)-(parseFPDate(a.salidaFecha)||0)).slice((page-1)*pageSize,page*pageSize);
    let tb=document.querySelector('#cashSalesTable tbody');
-   if(tb)tb.innerHTML=rows.map(e=>`<tr${(+e.discountAmount>0)?' class="fp-disc-row" title="Venta con descuento aplicado"':''}><td>${esc(e.reciboPrefijo||'FA')}${esc(e.reciboNumero||'')}</td><td>${esc(e.placa||e.plate||'')}</td><td>${esc(e.salidaFecha||e.dateTime||'')}</td><td>${esc(paymentLabel(e))}</td><td>${money(e.total||0)}</td><td>${money(e.cashAmount||0)}</td><td>${money(e.nequiAmount||0)}</td></tr>`).join('')||'<tr><td colspan="7">No hay ventas en esta caja.</td></tr>';
+   if(tb)tb.innerHTML=rows.map(e=>`<tr${rowTint(e)}><td>${esc(e.reciboPrefijo||'FA')}${esc(e.reciboNumero||'')}</td><td>${esc(e.placa||e.plate||'')}</td><td>${esc(e.salidaFecha||e.dateTime||'')}</td><td>${esc(paymentLabel(e))}</td><td>${money(e.total||0)}</td><td>${money(e.cashAmount||0)}</td><td>${money(e.nequiAmount||0)}</td></tr>`).join('')||'<tr><td colspan="7">No hay ventas en esta caja.</td></tr>';
    let pager=document.getElementById('cashSalesPager');
    if(!pager){
      const table=document.getElementById('cashSalesTable');
      if(table){pager=document.createElement('div');pager.id='cashSalesPager';pager.className='text-center';pager.style.marginTop='15px';table.parentNode.appendChild(pager);}
    }
    if(pager){
-     pager.innerHTML=`<button type="button" class="btn btn-sm btn-default" id="cashPrev" ${page<=1?'disabled':''}>Anterior</button> <span style="display:inline-block;margin:0 12px;line-height:32px">Página ${page} de ${pages} · ${sales.length} ventas</span> <button type="button" class="btn btn-sm btn-default" id="cashNext" ${page>=pages?'disabled':''}>Siguiente</button>`;
-     const pv=document.getElementById('cashPrev'),nx=document.getElementById('cashNext');
-     if(pv)pv.onclick=()=>{if(page>1){page--;render()}};
-     if(nx)nx.onclick=()=>{if(page<pages){page++;render()}};
+     fpPager(pager,page,pages,sales.length,'venta|ventas',p=>{page=p;render()});
    }
  }
  if(f)f.onsubmit=e=>{e.preventDefault();if(getReg()){fpAlert('Ya existe una caja abierta.','error');return;}let u=get(KEY.user,defaults.user);let reg={id:'R'+Date.now(),openedAt:new Date().toISOString(),openedBy:u.name||u.username,initialCash:+f.initialCash.value||0,observation:f.observation.value||''};set(R,reg);page=1;render();showCashToast('Caja abierta correctamente.','success')};
@@ -2304,7 +2547,7 @@ function buildCashCloseHtml(d){
   const fmt=x=>fmt24(x);
   const statusLabel={balanced:'Cuadrada',surplus:'Sobrante',deficit:'Faltante'}[d.status]||(d.status?esc(d.status):'—');
   const allSales=(d.ps||[]).slice().sort((a,b)=>(parseFPDate(a.salidaFecha)||0)-(parseFPDate(b.salidaFecha)||0));
-  const rows=allSales.map(x=>`<tr${(+x.discountAmount>0)?' class="disc"':''}><td>${esc(x.reciboPrefijo||x.receiptPrefix||'FA')}${esc(x.reciboNumero||x.receiptNumber||'')}</td><td>${esc(x.placa||x.plate||'')}</td><td>${esc(paymentLabel(x))}</td><td>${money(x.total||0)}</td><td>${money(x.cashAmount||0)}</td><td>${money(x.nequiAmount||0)}</td><td>${money(x.discountAmount||0)}</td></tr>`).join('')||'<tr><td colspan="7">Sin ventas de parqueadero.</td></tr>';
+  const rows=allSales.map(x=>`<tr${cashRowKind(x)?' class="fp-cj-'+cashRowKind(x)+'"':''}><td>${esc(x.reciboPrefijo||x.receiptPrefix||'FA')}${esc(x.reciboNumero||x.receiptNumber||'')}</td><td>${esc(x.placa||x.plate||'')}</td><td>${esc(paymentLabel(x))}</td><td>${money(x.total||0)}</td><td>${money(x.cashAmount||0)}</td><td>${money(x.nequiAmount||0)}</td><td>${money(x.discountAmount||0)}</td></tr>`).join('')||'<tr><td colspan="7">Sin ventas de parqueadero.</td></tr>';
   const ex=d.ex.map(x=>`<tr><td>${esc(fmt(x.dateTime))}</td><td>${esc(x.concept)||'—'}</td><td>${money(x.amount||0)}</td><td>${esc(x.user||'')}</td></tr>`).join('')||'<tr><td colspan="4">Sin egresos.</td></tr>';
   const bAdd=+d.baseAdded||0,bRem=+d.baseRemoved||0;
   const baseShown=d.baseFinal!=null?d.baseFinal:(d.reg.initialCash||0);
@@ -2312,7 +2555,7 @@ function buildCashCloseHtml(d){
   const baseList=[].concat((d.bin||[]).map(x=>({x,s:'+ '})),(d.bout||[]).map(x=>({x,s:'− '}))).sort((a,b)=>(parseFPDate(a.x.dateTime)||0)-(parseFPDate(b.x.dateTime)||0));
   const baseSection=baseList.length?`<h2 style="color:#e67e00;border-bottom-color:#f5b26b">Movimientos de base del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${baseList.map(r=>`<tr style="background:#fff3e0"><td>${esc(fmt(r.x.dateTime))}</td><td>${esc(r.x.concept)||'—'}</td><td>${r.s}${money(r.x.amount||0)}</td><td>${esc(r.x.user||'')}</td></tr>`).join('')}</tbody></table>`:'';
   const incRows=(d.inc||[]).map(x=>`<tr><td>${esc(fmt(x.dateTime))}</td><td>${esc(x.concept)||'—'}</td><td>${money(x.amount||0)}</td><td>${esc(x.user||'')}</td></tr>`).join('')||'<tr><td colspan="4">Sin ingresos manuales.</td></tr>';
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Cierre de caja</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#222}h1{text-align:center;font-size:22px;margin:0 0 8px}h2{font-size:16px;margin:20px 0 8px;border-bottom:1px solid #ccc;padding-bottom:5px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.box{border:1px solid #ddd;padding:10px;border-radius:6px}.box b{display:block;font-size:15px;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background:#f3f3f3}.right{text-align:right}.note{margin-top:18px;font-size:12px;color:#666}.obs{margin-top:14px;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:12px;background:#fafafa}tr.disc td{background:#ffebee;color:#c62828;font-weight:700}.obs b{display:block;margin-bottom:4px;font-size:12px}</style></head><body><h1>RESUMEN DE CIERRE DE CAJA</h1><div class="note">Apertura: ${esc(fmt(d.reg.openedAt))} · Cierre: ${esc(fmt(d.closedAt))} · Abrió: ${esc(d.reg.openedBy||'')} · Cerró: ${esc(d.closedBy||'')} · Estado: ${statusLabel}</div><div class="grid"><div class="box">Base del día<b>${money(baseShown)}</b>${baseNote}</div><div class="box">Ventas<b>${money((d.totalSales!=null?d.totalSales:(d.totalPark||0))+(+d.ig||0))}</b></div><div class="box">Ingresos manuales<b>${money(d.ig||0)}</b></div><div class="box">Pagos electrónicos<b>${money(d.salesElectronic)}</b></div><div class="box">Egresos<b>${money(d.eg)}</b></div><div class="box">Efectivo esperado<b>${money(d.expected)}</b></div><div class="box">Efectivo físico<b>${money(d.physical)}</b></div><div class="box">Diferencia<b>${money(d.diff)}</b></div><div class="box">Recibo inicial<b>${d.receiptStart?d.receiptPrefix+d.receiptStart:'N/A'}</b></div><div class="box">Recibo final<b>${d.receiptEnd?d.receiptPrefix+d.receiptEnd:'N/A'}</b></div><div class="box">Recibos emitidos<b>${d.receiptCount!=null?d.receiptCount:d.ps.length}</b></div></div>${d.observation?('<div class="obs"><b>Observación del cierre</b>'+esc(d.observation)+'</div>'):''}<h2>Ingresos manuales del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${incRows}</tbody></table><h2>Egresos del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${ex}</tbody></table>${baseSection}<h2>Ventas de parqueadero del día</h2><table><thead><tr><th>Recibo</th><th>Placa</th><th>Forma de pago</th><th>Total</th><th>Efectivo</th><th>Nequi</th><th>Descuento</th></tr></thead><tbody>${rows}</tbody></table><p class="note">El total de "Ventas" incluye las ventas de parqueadero (entradas/salidas) más los ingresos manuales de esta caja (ver detalle abajo). Los egresos se muestran aparte. Los pagos de mensualidades no se incluyen aquí; tienen su propio reporte en Mensualidades ("Reporte de mensualidades").</p></body></html>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Cierre de caja</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#222}h1{text-align:center;font-size:22px;margin:0 0 8px}h2{font-size:16px;margin:20px 0 8px;border-bottom:1px solid #ccc;padding-bottom:5px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.box{border:1px solid #ddd;padding:10px;border-radius:6px}.box b{display:block;font-size:15px;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background:#f3f3f3}.right{text-align:right}.note{margin-top:18px;font-size:12px;color:#666}.obs{margin-top:14px;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:12px;background:#fafafa}tr.fp-cj-desc td{background:#fdeeee}tr.fp-cj-nequi td{background:#eaf2fc}tr.fp-cj-cash td{background:#ebf7ee}tr.fp-cj-both td:nth-child(5){background:#ebf7ee}tr.fp-cj-both td:nth-child(6){background:#eaf2fc}tr{-webkit-print-color-adjust:exact;print-color-adjust:exact}.obs b{display:block;margin-bottom:4px;font-size:12px}</style></head><body><h1>RESUMEN DE CIERRE DE CAJA</h1><div class="note">Apertura: ${esc(fmt(d.reg.openedAt))} · Cierre: ${esc(fmt(d.closedAt))} · Abrió: ${esc(d.reg.openedBy||'')} · Cerró: ${esc(d.closedBy||'')} · Estado: ${statusLabel}</div><div class="grid"><div class="box">Base del día<b>${money(baseShown)}</b>${baseNote}</div><div class="box">Ventas<b>${money(d.totalSales!=null?d.totalSales:(d.totalPark||0))}</b></div><div class="box">Ingresos manuales<b>${money(d.ig||0)}</b></div><div class="box">Pagos electrónicos<b>${money(d.salesElectronic)}</b></div><div class="box">Egresos<b>${money(d.eg)}</b></div><div class="box">Efectivo esperado<b>${money(d.expected)}</b></div><div class="box">Efectivo físico<b>${money(d.physical)}</b></div><div class="box">Diferencia<b>${money(d.diff)}</b></div><div class="box">Recibo inicial<b>${d.receiptStart?d.receiptPrefix+d.receiptStart:'N/A'}</b></div><div class="box">Recibo final<b>${d.receiptEnd?d.receiptPrefix+d.receiptEnd:'N/A'}</b></div><div class="box">Recibos emitidos<b>${d.receiptCount!=null?d.receiptCount:d.ps.length}</b></div></div>${d.observation?('<div class="obs"><b>Observación del cierre</b>'+esc(d.observation)+'</div>'):''}<h2>Ingresos manuales del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${incRows}</tbody></table><h2>Egresos del día</h2><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Valor</th><th>Usuario</th></tr></thead><tbody>${ex}</tbody></table>${baseSection}<h2>Ventas de parqueadero del día</h2><table><thead><tr><th>Recibo</th><th>Placa</th><th>Forma de pago</th><th>Total</th><th>Efectivo</th><th>Nequi</th><th>Descuento</th></tr></thead><tbody>${rows}</tbody></table><p class="note">El total de "Ventas" incluye las ventas de parqueadero (entradas/salidas) más los ingresos manuales de esta caja (ver detalle abajo). Los egresos se muestran aparte. Los pagos de mensualidades no se incluyen aquí; tienen su propio reporte en Mensualidades ("Reporte de mensualidades").</p></body></html>`;
 }
 function showCashCloseSummary(d){
   try{
@@ -2400,10 +2643,7 @@ function initExpenses(){
   tb.querySelectorAll('.editMovement').forEach(b=>b.onclick=()=>openModal('edit',b.dataset.type,b.dataset.id));
   tb.querySelectorAll('.delMovement').forEach(b=>b.onclick=()=>del(b.dataset.type,b.dataset.id));
   if(pager){
-   const maxBtns=5;let start=Math.max(1,page-2),end=Math.min(pages,start+maxBtns-1);start=Math.max(1,end-maxBtns+1);
-   let nums='';for(let n=start;n<=end;n++)nums+=`<button type="button" class="${n===page?'active':''}" data-page="${n}">${n}</button>`;
-   pager.innerHTML=`<button type="button" data-page="prev" ${page<=1?'disabled':''}>‹ Anterior</button>${nums}<button type="button" data-page="next" ${page>=pages?'disabled':''}>Siguiente ›</button><span class="fp-page-count">Mostrando ${rows.length?((page-1)*pageSize+1):0} a ${Math.min(page*pageSize,rows.length)} de ${rows.length} movimientos</span>`;
-   pager.querySelectorAll('button').forEach(b=>b.onclick=()=>{const v=b.dataset.page;if(v==='prev'&&page>1)page--;else if(v==='next'&&page<pages)page++;else if(!isNaN(+v))page=+v;render()});
+   fpPager(pager,page,pages,rows.length,'movimiento|movimientos',p=>{page=p;render()});
   }
   renderBaseInfo();
  }
@@ -2596,10 +2836,7 @@ function initLoginHistory(){
     const pageRows=rows.slice((page-1)*pageSize,page*pageSize);
     tb.innerHTML=pageRows.map(h=>`<tr><td>${esc(h.username)}</td><td>${esc(h.name)}</td><td>${esc(h.role||'Empleado')}</td><td>${esc(fmt24(h.at))}</td></tr>`).join('')||'<tr><td colspan="4">No hay ingresos registrados.</td></tr>';
     if(pager){
-      pager.innerHTML=`<button type="button" class="btn btn-sm btn-default" id="loginHistoryPrev" ${page<=1?'disabled':''}>Anterior</button> <span style="display:inline-block;margin:0 12px;line-height:32px">Página ${page} de ${pages} · ${rows.length} ingresos</span> <button type="button" class="btn btn-sm btn-default" id="loginHistoryNext" ${page>=pages?'disabled':''}>Siguiente</button>`;
-      const pv=document.getElementById('loginHistoryPrev'), nx=document.getElementById('loginHistoryNext');
-      if(pv)pv.onclick=()=>{if(page>1){page--;render()}};
-      if(nx)nx.onclick=()=>{if(page<pages){page++;render()}};
+      fpPager(pager,page,pages,rows.length,'ingreso|ingresos',p=>{page=p;render()});
     }
   }
   render();

@@ -1170,8 +1170,8 @@ html,body{background:#f7f8fa!important;color:#30343b!important}.wrapper,.main-pa
 .printSale,.printMonthlyPayment{width:42px!important;height:38px!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;background:#fff!important;color:#0b2748!important;border:1px solid #d5dbe2!important;border-radius:7px!important;box-shadow:none!important}
 .printSale i,.printMonthlyPayment i{margin:0!important;font-size:16px!important;color:#0b2748!important}
 /* Paginación / cuadros de navegación */
-.fp-pager button,.fp-pager button.active,#salesPager button{background:var(--fp-nav-blue)!important;border-color:var(--fp-nav-blue)!important;color:#fff!important}
-.fp-pager button:disabled,#salesPager button:disabled{background:#eef1f4!important;border-color:#d7dce2!important;color:#8a929c!important}
+.fp-pager button,.fp-pager button.active,#salesPager button,#cashSalesPager button,#loginHistoryPager button{background:var(--fp-nav-blue)!important;border-color:var(--fp-nav-blue)!important;color:#fff!important}
+.fp-pager button:disabled,#salesPager button:disabled,#cashSalesPager button:disabled,#loginHistoryPager button:disabled{background:#eef1f4!important;border-color:#d7dce2!important;color:#8a929c!important}
 /* Selectores: caja limpia y flecha azul */
 select.form-control{color:#30343b!important}
 /* Íconos de navegación pequeños y uniformes */
@@ -1188,7 +1188,7 @@ select.form-control{color:#30343b!important}
 .fp-modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
 .fp-payment-panel{margin-top:4px}
 .fp-payment-title{font-weight:700;font-size:14px;margin:0 0 8px;color:#30343b}
-.fp-payment-methods{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.fp-payment-methods{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}#editSaleOverlay .fp-payment-methods{grid-template-columns:repeat(4,1fr)}
 .fp-payment-method{min-height:54px;border:1px solid #d5d9de;border-radius:12px;background:#fff;color:#30343b;font-weight:700;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;transition:.15s}
 .fp-payment-method.active{background:#0b2748;color:#fff;border-color:#0b2748}
 .fp-payment-method:hover:not(.active){background:#f4f6f8}
@@ -1266,6 +1266,7 @@ select.form-control{color:#30343b!important}
         <button type="button" class="fp-payment-method" data-edit-method="cash"><span class="fp-pay-icon">▣</span><span>Efectivo</span></button>
         <button type="button" class="fp-payment-method" data-edit-method="nequi"><span class="fp-pay-icon">▯</span><span>Electrónico</span></button>
         <button type="button" class="fp-payment-method" data-edit-method="both"><span class="fp-pay-icon">⇄</span><span>Ambos</span></button>
+        <button type="button" class="fp-payment-method" data-edit-method="pending"><span class="fp-pay-icon">⏳</span><span>Pendiente</span></button>
       </div>
       <div class="fp-payment-amounts" id="editSaleAmounts">
         <div class="fp-payment-row"><label for="editSaleCash">Efectivo</label><input type="number" id="editSaleCash" min="0" step="1" value="0"></div>

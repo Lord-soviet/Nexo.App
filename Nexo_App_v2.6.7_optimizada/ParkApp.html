@@ -1212,8 +1212,8 @@ body{background:#f7f8fa!important;color:#30343b!important}.wrapper{background:#f
 .printSale,.printMonthlyPayment{width:42px!important;height:38px!important;padding:0!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;background:#fff!important;color:#0b2748!important;border:1px solid #d5dbe2!important;border-radius:7px!important;box-shadow:none!important}
 .printSale i,.printMonthlyPayment i{margin:0!important;font-size:16px!important;color:#0b2748!important}
 /* Paginación / cuadros de navegación */
-.fp-pager button,.fp-pager button.active,#salesPager button{background:var(--fp-nav-blue)!important;border-color:var(--fp-nav-blue)!important;color:#fff!important}
-.fp-pager button:disabled,#salesPager button:disabled{background:#eef1f4!important;border-color:#d7dce2!important;color:#8a929c!important}
+.fp-pager button,.fp-pager button.active,#salesPager button,#cashSalesPager button,#loginHistoryPager button{background:var(--fp-nav-blue)!important;border-color:var(--fp-nav-blue)!important;color:#fff!important}
+.fp-pager button:disabled,#salesPager button:disabled,#cashSalesPager button:disabled,#loginHistoryPager button:disabled{background:#eef1f4!important;border-color:#d7dce2!important;color:#8a929c!important}
 /* Selectores: caja limpia y flecha azul */
 select.form-control{color:#30343b!important}
 /* Íconos de navegación pequeños y uniformes */
@@ -1237,6 +1237,9 @@ a[href="index.html"] > div{background:var(--fp-nav-blue)!important;color:#fff!im
 #divtipopago .fp-payment-method{background:#fff!important;color:#30343b!important;border-color:#d5d9de!important;}
 #divtipopago .fp-payment-method.active{background:#0b2748!important;color:#fff!important;border-color:#0b2748!important;}
 #divtipopago .fp-payment-method:hover:not(.active){background:#fff!important;color:#30343b!important;}
+/* Entradas: botones Efectivo / Electrónico / Ambos más angostos */
+#divtipopago .fp-payment-methods{grid-template-columns:repeat(3,minmax(0,110px));justify-content:start;gap:6px;}
+#divtipopago .fp-payment-method{min-height:36px;height:36px;padding:2px 6px;line-height:1.1;}
 </style>
 </head>
 
@@ -1318,8 +1321,7 @@ a[href="index.html"] > div{background:var(--fp-nav-blue)!important;color:#fff!im
                     <div class="col-md-7">    
                         <center><label>PLACA</label></center>
                         <div id="placaSuggestWrap" style="position:relative;">
-                            <input type="placa" maxlength="10" id="placa" name="placa" autocomplete="off" onkeyup="myFunction()" required="">
-                            <small id="placaTipoHint" style="display:none;margin-top:4px;font-weight:700;color:#e67e00"></small>
+                            <input type="placa" maxlength="6" id="placa" name="placa" autocomplete="off" onkeyup="myFunction()" required="">
                             <div id="placaSuggestions" role="listbox" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:0 0 5px 5px;box-shadow:0 4px 12px rgba(0,0,0,.18);max-height:230px;overflow-y:auto;text-align:left;"></div>
                         </div>
                     </div>
@@ -1361,9 +1363,9 @@ a[href="index.html"] > div{background:var(--fp-nav-blue)!important;color:#fff!im
                                 <label style="background:white;padding:5%;font-size:30px;width: 100%;" id="resta">
                                     0Mes 0Dia 0Hora 0min</label>
                             </div>
-                            <label class="col-md-2" id="svcLabel">Servicio</label>
-                            <div class="col-md-10" id="svcSelectWrap">
-                                <select id="idTarifa" name="idTarifa" class="form-control" onchange="calcularTarifaServidor()">
+                            <label class="col-md-2">Servicio</label>
+                            <div class="col-md-10">
+                                <select id="idTarifa" name="idTarifa" class="form-control" onchange="calcularTarifaServidor()" required="">
                                     <option value="">Seleccione Servicio</option>
                                                                         <option value="5">parqueadero Carro</option>
                                                                         <option value="6">parqueadero Moto</option>
@@ -1754,20 +1756,6 @@ a[href="index.html"] > div{background:var(--fp-nav-blue)!important;color:#fff!im
 </script>
 
 <script>
-/* Límite de la placa en Entradas: máximo 6 caracteres (ABC123, ABC12D).
-   Excepción: los códigos propios cicla/ptelec/mtelec llevan consecutivo y pueden pasar de 6. */
-(function(){
-  var SPECIAL=/^(CICLA|CICAL|PTELEC|MTELE)/i;
-  function limitPlaca(e){
-    var inp=e.target||document.getElementById('placa'); if(!inp||inp.id!=='placa') return;
-    var max=SPECIAL.test(inp.value)?10:6;
-    if(inp.value.length>max) inp.value=inp.value.slice(0,max);
-    inp.maxLength=10;
-  }
-  document.addEventListener('input',limitPlaca,true);
-  document.addEventListener('paste',function(e){ setTimeout(function(){limitPlaca({target:document.getElementById('placa')});},0); },true);
-})();
-
 function myFunction() {
     var input, filter, table, tr, td, i, txtValue;
     input = document.getElementById("placa");
@@ -1955,6 +1943,8 @@ function calcularTarifaServidor(){
   }
   function resetReceiptCounterV38(){
     if(localStorage.getItem(RESET_COUNTER_V38_KEY)==='1') return;
+    // Con datos ya guardados no se reinicia el consecutivo de recibos (evita recibos repetidos).
+    if(hasStoredData()){ localStorage.setItem(RESET_COUNTER_V38_KEY,'1'); return; }
     localStorage.setItem(COUNTER_KEY,'0');
     try{
       const c=JSON.parse(localStorage.getItem('fp_config')||'{}');
@@ -2056,8 +2046,28 @@ function calcularTarifaServidor(){
     });
     return rows;
   }
+  function hasStoredData(){
+    // true si ya hay información real guardada (usuarios, entradas, mensualidades, ventas, caja, etc.)
+    const keys=['fp_users','fp_entries','fp_entries_archive','fp_monthly','fp_monthly_payments','fp_incomes','fp_expenses','fp_cash_closings','fp_cash_register','fp_closures','fp_sales'];
+    return keys.some(k=>{
+      try{
+        const raw=localStorage.getItem(k);
+        if(raw==null||raw==='') return false;
+        const v=JSON.parse(raw);
+        return Array.isArray(v)?v.length>0:(v&&typeof v==='object'?Object.keys(v).length>0:!!v);
+      }catch(e){ return true; /* si no se puede leer, mejor no tocarlo */ }
+    });
+  }
   function resetOperationalDataV85(){
     if(localStorage.getItem(RESET_OPERATIONAL_V85_KEY)==='1') return;
+    // Si ya hay datos guardados (instalación existente o actualización), NUNCA se borra nada:
+    // solo se deja la marca para que este reinicio histórico no vuelva a evaluarse.
+    if(hasStoredData()){
+      localStorage.setItem(SEEDED_KEY,'1');
+      localStorage.setItem(CLEANUP_KEY,'1');
+      localStorage.setItem(RESET_OPERATIONAL_V85_KEY,'1');
+      return;
+    }
     // Limpieza de datos operativos: se conservan usuarios, contraseñas y configuración del local.
     const operationalKeys=[
       DB_KEY,
@@ -2118,65 +2128,12 @@ function calcularTarifaServidor(){
     if(entryMode){ if(reg)reg.style.display='block'; if(pay)pay.style.display='none'; if(div)div.style.display='none'; }
     else { if(reg)reg.style.display='none'; if(pay)pay.style.display='block'; if(div)div.style.display='block'; }
   }
-  // ---- Detección automática del tipo de vehículo al escribir la placa ----
-  // Códigos propios: cicla/cicla1… → Cicla · ptelec/ptelec1… (patineta eléctrica) → tarifa Cicla ·
-  // mtelec/mtele1… (moto eléctrica) → tarifa Moto. Placas: ABC123 → Carro · ABC12D / ABC12 → Moto.
-  // Si la placa ya entró antes se respeta el servicio con el que se registró.
-  // El selector de "Servicio" solo se muestra cuando la placa no se reconoce, al pulsar "Cambiar"
-  // o al abrir una entrada existente para cobrar la salida.
-  const SVC_FALLBACK_ID={carro:'5',moto:'6',cicla:'7'}, SVC_NAME_RE={carro:/carro|autom[oó]vil|camioneta/i,moto:/moto/i,cicla:/cicla|bici/i};
-  function svcOptionId(kind){
-    const sel=el('idTarifa'); if(!sel) return null;
-    const opts=Array.from(sel.options).filter(o=>o.value);
-    const byName=opts.find(o=>SVC_NAME_RE[kind].test(o.text));
-    const byId=opts.find(o=>o.value===SVC_FALLBACK_ID[kind]);
-    return (byName||byId||{}).value||null;
-  }
-  function detectServiceByPlate(raw){
-    const p=String(raw||'').toUpperCase().replace(/[\s-]/g,'');
-    if(!p) return null;
-    if(/^(CICLA|CICAL)\d*$/.test(p)) return {kind:'cicla',label:'Cicla'};
-    if(/^PTELEC\d*$/.test(p)) return {kind:'cicla',label:'Patineta eléctrica → tarifa Cicla'};
-    if(/^MTELE[C]?\d*$/.test(p)) return {kind:'moto',label:'Moto eléctrica → tarifa Moto'};
-    if(p.length>=5){
-      const prev=readDB().filter(x=>x&&String(x.placa||'').replace(/[\s-]/g,'').toUpperCase()===p&&x.idTarifa).sort((a,b)=>(+b.id||0)-(+a.id||0))[0];
-      if(prev){ const tid=Array.isArray(prev.idTarifa)?(prev.idTarifa[0]&&prev.idTarifa[0].id):prev.idTarifa; if(tid) return {id:String(tid),label:(getTariff(tid).nombre||'Servicio')+' (según historial)'}; }
-    }
-    if(/^[A-Z]{3}\d{3}$/.test(p)) return {kind:'carro',label:'Carro'};
-    if(/^[A-Z]{3}\d{2}[A-Z]$/.test(p)) return {kind:'moto',label:'Moto'};
-    if(/^[A-Z]{3}\d{2}$/.test(p)) return {kind:'moto',label:'Moto'};
-    return null;
-  }
-  function svcSelectorVisible(v){ ['svcLabel','svcSelectWrap'].forEach(function(id){ const n=el(id); if(n) n.style.display=v?'':'none'; }); }
-  function setPlateHint(html){ const h=el('placaTipoHint'); if(!h) return; if(html){ h.innerHTML=html; h.style.display='block'; } else { h.style.display='none'; h.innerHTML=''; } }
-  function applyPlateDetection(){
-    const sel=el('idTarifa'); if(!sel) return;
-    const raw=value('placa'), p=String(raw||'').toUpperCase().replace(/[\s-]/g,'');
-    // Entrada existente abierta para cobrar: se muestra el servicio con el que entró, sin tocarlo.
-    if(selectedId!=null){ svcSelectorVisible(true); setPlateHint(''); return; }
-    if(!p){ sel.value=''; setPlateHint(''); svcSelectorVisible(false); return; }
-    const r=detectServiceByPlate(raw);
-    let id=null;
-    if(r){ id = r.id && Array.from(sel.options).some(function(o){return o.value===r.id;}) ? r.id : (r.kind ? svcOptionId(r.kind) : null); }
-    if(id){
-      if(sel.value!==id){ sel.value=id; if(typeof window.calcularTarifaServidor==='function') window.calcularTarifaServidor(); }
-      setPlateHint('Detectado: '+escapeHtml(r.label)+' · <a href="#" id="svcChange" style="color:#e67e00;text-decoration:underline">Cambiar</a>');
-      svcSelectorVisible(false);
-      return;
-    }
-    // Sin reconocer: se limpia el servicio para no dejar uno viejo por error.
-    sel.value='';
-    if(p.length>=5){ setPlateHint('Placa no reconocida: elija el servicio.'); svcSelectorVisible(true); }
-    else { setPlateHint(''); svcSelectorVisible(false); }
-  }
   function clearForm(){
     selectedId=null;
-    setPlateHint('');
     setValue('placa',''); setValue('descripcion',''); setValue('nota',''); setValue('idEntrada','0');
     setValue('reciboNumero','0'); setValue('reciboPrefijo','FA'); setValue('entradaFecha',nowString());
     setValue('subtotal','0'); setValue('valor','0'); setValue('valorDescuento','0'); setValue('iva','0'); setValue('retencion','0');
     if(el('idTarifa')) el('idTarifa').value='';
-    svcSelectorVisible(false);
     paymentState.seleccion='cash';
     paymentState.montos={cash:'',nequi:''};
     setPaymentMethod('cash');
@@ -2194,7 +2151,7 @@ function calcularTarifaServidor(){
     setValue('idCliente',data.idCliente||'2'); setValue('idParqueadero',data.idParqueadero||'1'); setValue('idUsuario',data.idUsuario||'3');
     const tid=Array.isArray(data.idTarifa)?(data.idTarifa[0]?.id||''):data.idTarifa;
     setValue('idTarifa',tid||''); setValue('nota',data.nota||''); setValue('descripcion',data.descripcion||'');
-    setValue('placa',data.placa||''); setValue('reciboNumero',data.reciboNumero||'0'); setValue('reciboPrefijo',data.reciboPrefijo||'FA'); setValue('idEntrada',data.id||'0'); applyPlateDetection();
+    setValue('placa',data.placa||''); setValue('reciboNumero',data.reciboNumero||'0'); setValue('reciboPrefijo',data.reciboPrefijo||'FA'); setValue('idEntrada',data.id||'0');
     const savedMethod=data.salidaFecha ? normalizePaymentMethod(data.paymentMethod||data.idTipoPago||'cash') : 'cash';
     paymentState.seleccion=savedMethod||'cash';
     paymentState.montos={cash:paymentState.seleccion==='both' ? String(Number(data.cashAmount)||0) : (paymentState.seleccion==='cash' ? String(Number(data.total)||0) : ''),nequi:paymentState.seleccion==='both' ? String(Number(data.nequiAmount)||0) : (paymentState.seleccion==='nequi' ? String(Number(data.total)||0) : '')};
@@ -2259,7 +2216,7 @@ function calcularTarifaServidor(){
       const d=new Date(x); if(isNaN(d)) return null; if(endOfDay)d.setHours(23,59,59,999); else d.setHours(0,0,0,0); return d;
     }
     const today=new Date(); today.setHours(0,0,0,0);
-    return list.find(m=>{
+    const matches=list.filter(m=>{
       if(!m || typeof m!=='object') return false;
       const mp=normalizePlate(m.plate??m.placa??m.Placa??m.PLACA);
       if(!mp || mp!==wanted) return false;
@@ -2271,7 +2228,17 @@ function calcularTarifaServidor(){
       if(st && today<st) return false;
       if(en){ const grace=new Date(en.getTime()); grace.setDate(grace.getDate()+3); if(today>grace) return false; }
       return true;
-    }) || null;
+    });
+    if(!matches.length) return null;
+    // La misma mensualidad puede venir repetida (varias claves de almacenamiento) o la placa puede
+    // tener un registro viejo. Se descartan repetidos por id y se toma la de fecha de fin más reciente
+    // (a igualdad, la actualizada más recientemente), en vez de la primera que aparezca.
+    const seen=new Set(), uniq=[];
+    matches.forEach(m=>{ const k=m.id!=null?('id:'+m.id):null; if(k){ if(seen.has(k)) return; seen.add(k); } uniq.push(m); });
+    const endKey=m=>String(m.end??m.fechaFin??m.fin??m.hasta??'');
+    const updKey=m=>String(m.updatedAt??m.createdAt??'');
+    uniq.sort((x,y)=> endKey(y).localeCompare(endKey(x)) || updKey(y).localeCompare(updKey(x)));
+    return uniq[0];
   }
 
   // Determina si una mensualidad es "de noche" y si el momento indicado (por defecto ahora)
@@ -2283,16 +2250,31 @@ function calcularTarifaServidor(){
     when = when || new Date();
     const scheduleType=String(monthly.schedule??monthly.horario??'day').trim().toLowerCase();
     const isNight = scheduleType==='night' || scheduleType==='noche';
-    if(!isNight) return {isNight:false, insideWindow:true, entryLimit:null, exitLimit:null};
-    const parseHHMM=v=>{ if(v==null||v==='') return null; const m=String(v).trim().match(/^(\d{1,2}):(\d{2})/); if(!m) return null; const h=Math.min(23,Math.max(0,+m[1])), mi=Math.min(59,Math.max(0,+m[2])); return h*60+mi; };
+    if(!isNight) return {isNight:false, insideWindow:true, entryLimit:null, exitLimit:null, missingHours:false};
+    // Acepta "19:00", "7:00 PM", "7pm", "7 p. m.", "19", "19h". Devuelve minutos del día o null.
+    const parseHHMM=v=>{
+      if(v==null) return null;
+      const s=String(v).trim().toLowerCase().replace(/\./g,'').replace(/\s+/g,'');
+      if(!s) return null;
+      const m=s.match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?(am|pm)?h?$/);
+      if(!m) return null;
+      let h=+m[1]; const mi=+(m[2]||0);
+      if(m[3]==='pm' && h<12) h+=12;
+      if(m[3]==='am' && h===12) h=0;
+      if(h>23||mi>59) return null;
+      return h*60+mi;
+    };
     const entryLimit=parseHHMM(monthly.nightEntryLimit??monthly.horaLimiteEntrada);
     const exitLimit=parseHHMM(monthly.nightExitLimit??monthly.horaLimiteSalida);
-    if(entryLimit==null || exitLimit==null) return {isNight:true, insideWindow:true, entryLimit:null, exitLimit:null};
+    // Sin horas válidas no se puede saber la franja: se trata como cubierta (bloquea), pero se avisa por qué.
+    if(entryLimit==null || exitLimit==null) return {isNight:true, insideWindow:true, entryLimit:null, exitLimit:null, missingHours:true};
     const nowMin=when.getHours()*60+when.getMinutes();
+    // Franja [entrada, salida): a la hora límite de salida en punto ya queda fuera y se puede registrar.
     let inside;
-    if(entryLimit<=exitLimit) inside = nowMin>=entryLimit && nowMin<=exitLimit;
-    else inside = nowMin>=entryLimit || nowMin<=exitLimit;
-    return {isNight:true, insideWindow:inside, entryLimit, exitLimit};
+    if(entryLimit<exitLimit) inside = nowMin>=entryLimit && nowMin<exitLimit;
+    else if(entryLimit>exitLimit) inside = nowMin>=entryLimit || nowMin<exitLimit;
+    else inside = true; // entrada = salida: franja de 24 h
+    return {isNight:true, insideWindow:inside, entryLimit, exitLimit, missingHours:false};
   }
   // Evalúa si una placa con mensualidad activa debe bloquear el registro de entrada (mensualidad
   // de día, o de noche dentro de su horario) o si, por ser de noche y estar fuera de su horario
@@ -2304,15 +2286,34 @@ function calcularTarifaServidor(){
     const blocked=!(status.isNight && !status.insideWindow);
     return {monthly,blocked,status};
   }
+  // Entrada abierta (sin salida) de una placa: si existe, no se puede registrar otra.
+  function findOpenEntry(placa){
+    const p=String(placa||'').trim().toUpperCase();
+    if(!p) return null;
+    return readDB().find(x=>x && !x.salidaFecha && String(x.placa||'').trim().toUpperCase()===p) || null;
+  }
+  function openEntryMessage(placa,open){
+    return 'La placa '+placa+' ya está adentro: tiene una entrada abierta (recibo '+receiptNumberFA(open.reciboNumero)+', ingresó '+receiptDateTime(open.entradaFecha)+'). Dele salida primero y luego registre la nueva entrada.';
+  }
+  function missingHoursMessage(placa){
+    return 'La placa '+placa+' tiene una mensualidad de noche sin horas válidas guardadas, por eso no se puede registrar la entrada. Edite la mensualidad en Mensualidades y configure la hora límite de entrada y de salida.';
+  }
   function checkMonthlyPlate(){
     const placa=value('placa').trim().toUpperCase();
+    const open=findOpenEntry(placa);
     const info=evaluateMonthlyForPlate(placa);
     const msg=el('monthlyEntryNotice');
     const reg=el('btnRegistrar');
     let text='', warn=true;
-    if(info.monthly){
+    if(open){
+      // Vehículo que está adentro (se consulta para darle salida): no se muestra texto aquí.
+      // El botón Registrar sigue atenuado y, si se pulsa, avisa que la placa ya está adentro.
+      text='';
+    } else if(info.monthly){
       if(info.blocked){
-        text='Esta placa tiene una mensualidad activa. No se puede registrar una entrada.';
+        text=(info.status && info.status.missingHours)
+          ? missingHoursMessage(placa)
+          : 'Esta placa tiene una mensualidad activa. No se puede registrar una entrada.';
         warn=true;
       } else {
         const lim=(info.status.entryLimit!=null && info.status.exitLimit!=null)
@@ -2328,8 +2329,11 @@ function calcularTarifaServidor(){
       msg.style.color=warn?'#856404':'#0b2748';
       msg.style.borderColor=warn?'#ffe69c':'#bcdcfb';
     }
-    if(reg) reg.style.pointerEvents=info.blocked?'none':'';
-    return info.blocked?info.monthly:null;
+    // Solo se atenúa el botón: el clic SIEMPRE se evalúa de nuevo con la hora actual (antes se
+    // desactivaba con pointer-events y quedaba "congelado" aunque ya hubiera pasado la hora límite).
+    const blockedNow=!!open||info.blocked;
+    if(reg){ reg.style.pointerEvents=''; reg.style.opacity=blockedNow?'.55':''; }
+    return open||(info.blocked?info.monthly:null);
   }
 
   let registering=false;
@@ -2341,12 +2345,15 @@ function calcularTarifaServidor(){
     try {
     const placa=value('placa').trim().toUpperCase();
     if(!placa){ fpAlert('Ingrese la placa.','error'); if(el('placa'))el('placa').focus(); return; }
+    const openNow=findOpenEntry(placa);
+    if(openNow){ fpAlert(openEntryMessage(placa,openNow),'error'); checkMonthlyPlate(); return; }
     const monthlyInfo=evaluateMonthlyForPlate(placa);
-    if(monthlyInfo.blocked){ fpAlert('No se puede registrar esta entrada: la placa '+placa+' tiene una mensualidad activa.','error'); checkMonthlyPlate(); return; }
-    if(!value('idTarifa')) applyPlateDetection();
-    const tarifaId=value('idTarifa'); if(!tarifaId){ svcSelectorVisible(true); fpAlert('No se reconoció la placa: seleccione el servicio.','error'); return; }
+    if(monthlyInfo.blocked){
+      fpAlert((monthlyInfo.status&&monthlyInfo.status.missingHours)?missingHoursMessage(placa):('No se puede registrar esta entrada: la placa '+placa+' tiene una mensualidad activa.'),'error');
+      checkMonthlyPlate(); return;
+    }
+    const tarifaId=value('idTarifa'); if(!tarifaId){ fpAlert('Seleccione el servicio.','error'); return; }
     const db=readDB();
-    if(db.some(x=>!x.salidaFecha && String(x.placa).toUpperCase()===placa)){ fpAlert('Esta placa ya tiene una entrada abierta.','error'); return; }
     const recibo=nextReceipt(), fecha=nowString();
     const entry={id:Date.now(),idParqueadero:value('idParqueadero')||'1',idCliente:value('idCliente')||'2',idTarifa:tarifaId,idUsuario:value('idUsuario')||'3',placa,descripcion:value('descripcion')||'NA',nota:value('nota')||'NA',entradaFecha:fecha,entradaHora:new Date().toTimeString().slice(0,8),reciboPrefijo:value('reciboPrefijo')||'FA',reciboNumero:recibo,salidaFecha:null,salidaHora:null,codigoBarras:value('codigoBarras')||'NA',local:true};
     if(monthlyInfo.monthly && !monthlyInfo.blocked){
@@ -2731,20 +2738,17 @@ function calcularTarifaServidor(){
     fpParseCache[key]={raw:raw,val:val}; return val;
   }
   // Una placa deja de aparecer en las sugerencias si no ha tenido actividad
-  // (entrada/salida, o actualización de su mensualidad) en los últimos
+  // (entrada/salida registrada) en los últimos
   // PLATE_SUGGESTION_STALE_DAYS días. Vuelve a aparecer en cuanto se
   // registra de nuevo. Excepción: un vehículo actualmente parqueado (sin
   // salida) nunca se oculta, sin importar cuántos días lleve adentro —
   // sigue físicamente ahí y el operador necesita poder encontrarlo.
   const PLATE_SUGGESTION_STALE_DAYS=15;
   function isStalePlateSource(x){
-    if(!x || x._monthly !== true){
-      // Entrada real todavía abierta (sin salida): nunca se considera vieja.
-      if(x && !x.salidaFecha) return false;
-    }
-    const raw=x.salidaFecha||x.entradaFecha||x.updatedAt||x.createdAt||x.start;
-    const d=parseDate(raw);
-    if(!d) return false; // sin fecha reconocible: no ocultar por seguridad
+    if(!x) return true;
+    // Entrada real todavía abierta (sin salida): nunca se considera vieja.
+    if(!x.salidaFecha) return false;
+    const d=parseDate(x.salidaFecha||x.entradaFecha||x.updatedAt||x.createdAt);
     const cutoff=new Date(); cutoff.setDate(cutoff.getDate()-PLATE_SUGGESTION_STALE_DAYS);
     return d<cutoff;
   }
@@ -2758,18 +2762,9 @@ function calcularTarifaServidor(){
     (function(){
       const a=fpCachedList(DB_KEY); for(let i=0;i<a.length;i++) sources.push(a[i]);
     })();
-    // También se incluyen placas que tienen mensualidad registrada, para que
-    // al digitarlas el usuario pueda encontrarlas aunque no tengan una entrada abierta.
-    ['fp_monthly','fp_monthalities','monthly','mensualidades'].forEach(function(k){
-      try{
-        const a=(k==='fp_monthly')?fpCachedList(k):JSON.parse(localStorage.getItem(k)||'[]');
-        if(Array.isArray(a)) a.forEach(function(m){ sources.push({placa:m.placa??m.plate,entradaFecha:m.updatedAt||m.createdAt||m.start,salidaFecha:null,idTarifa:m.vehicle||'',_monthly:true}); });
-        else if(a && typeof a==='object'){
-          const arr=Array.isArray(a.data)?a.data:(Array.isArray(a.items)?a.items:[a]);
-          arr.forEach(function(m){ sources.push({placa:m.placa??m.plate,entradaFecha:m.updatedAt||m.createdAt||m.start,salidaFecha:null,idTarifa:m.vehicle||'',_monthly:true}); });
-        }
-      }catch(e){}
-    });
+    // Solo se sugieren placas con entradas REALES (parqueadero). Una mensualidad que no ha
+    // registrado entrada no aparece en la lista; aparece cuando registra una entrada y
+    // desaparece de nuevo tras PLATE_SUGGESTION_STALE_DAYS días sin actividad.
     sources.forEach(function(x){
       if(!x) return;
       if(isStalePlateSource(x)) return;
@@ -2827,7 +2822,6 @@ function calcularTarifaServidor(){
     }else{
       clearForm();
       setValue('placa',plate);
-      applyPlateDetection();
       text('impplaca',plate);
       text('imprecibo','');
       text('impentrada','');
@@ -2838,6 +2832,7 @@ function calcularTarifaServidor(){
       if(el('impnequi')) text('impnequi','');
       applyBusinessInfo(); applyReceiptConfig(false);
       if(el('placa')) el('placa').focus();
+      try{ checkMonthlyPlate(); }catch(_e){}
     }
     hidePlateSuggestions();
   }
@@ -2859,6 +2854,25 @@ function calcularTarifaServidor(){
     if(matches[idx]){ selectPlateSuggestion(matches[idx]); return true; }
     return false;
   }
+  /* Reconoce el tipo de vehiculo a partir del texto de la placa (max. 6 caracteres).
+     Devuelve el id del servicio: '5' = Carro, '6' = Moto, '7' = Cicla/Patineta; '' si no coincide. */
+  function detectVehicleServiceId(raw){
+    const p=String(raw||'').toUpperCase().replace(/[\s-]/g,'');
+    if(!p) return '';
+    if(/^(BICI|CICLA|PATIN)[01]?$/.test(p) || /^PTELE[C01]$/.test(p)) return '7'; /* bici, cicla, patin (+0/1) y patineta electrica: ptelec, ptele1, ptele0 */
+    if(/^[A-Z]{3}\d{2}[A-Z]$/.test(p) || /^MTELE[C01]$/.test(p)) return '6';      /* moto: ABC12D, moto electrica */
+    if(/^[A-Z]{3}\d{3}$/.test(p) || /^\d{3}[A-Z]{3}$/.test(p)) return '5';        /* carro: ABC123, 123ABC */
+    return '';
+  }
+  function applyVehicleFromPlate(){
+    if(selectedId!=null) return; /* una entrada abierta conserva su servicio original */
+    const sel=el('idTarifa'); if(!sel) return;
+    const id=detectVehicleServiceId(value('placa'));
+    if(!id || sel.value===id) return;
+    if(!Array.from(sel.options).some(o=>o.value===id)) return;
+    sel.value=id;
+    if(value('idTarifa')) showCalculation(value('entradaFecha'));
+  }
   window.myFunction=function(){
     const filter=value('placa').trim().toUpperCase();
     document.querySelectorAll('#myTable tbody tr').forEach(tr=>{const cell=tr.cells[0];tr.style.display=(!filter || ((cell?.textContent||'').toUpperCase().includes(filter)))?'':'none';});
@@ -2879,6 +2893,7 @@ function calcularTarifaServidor(){
       // lugar; el monto que se ve en pantalla no cambia de forma perceptible
       // segundo a segundo, así que no se nota la diferencia.
       fpTariffTick++;
+      if(fpTariffTick%10===0){ try{ if(el('placa') && value('placa')) checkMonthlyPlate(); }catch(_e){} }
       if(selectedId!==null && fpTariffTick%5===0){
         const db=readDB();
         const entry=db.find(x=>String(x.id)===String(selectedId));
@@ -2901,15 +2916,14 @@ function calcularTarifaServidor(){
     const form=document.querySelector('form[action="#"]');
     if(form) form.addEventListener('submit',function(ev){ ev.preventDefault(); ev.stopPropagation(); });
     const registerBtn=el('btnRegistrar');
-    if(registerBtn) registerBtn.addEventListener('click',function(ev){ ev.preventDefault(); ev.stopPropagation(); const placaNow=value('placa').trim().toUpperCase(); const infoNow=evaluateMonthlyForPlate(placaNow); if(infoNow.blocked){ checkMonthlyPlate(); fpAlert('No se puede registrar esta entrada: la placa '+placaNow+' tiene una mensualidad activa.','error'); return; } if(typeof window.registrar==='function') window.registrar(); });
+    if(registerBtn) registerBtn.addEventListener('click',function(ev){ ev.preventDefault(); ev.stopPropagation(); checkMonthlyPlate(); if(typeof window.registrar==='function') window.registrar(); });
     resetOperationalDataV85();
     seedDatabase();
     cleanupImportedOpenEntries();
     resetReceiptCounterV38();
     renderTable();
     clearForm();
-    if(el('idTarifa')) el('idTarifa').addEventListener('change',function(){ if(selectedId==null) setPlateHint('Servicio elegido manualmente.'); if(value('idTarifa')) showCalculation(value('entradaFecha')); });
-    if(el('placaTipoHint')) el('placaTipoHint').addEventListener('click',function(ev){ if(ev.target&&ev.target.id==='svcChange'){ ev.preventDefault(); svcSelectorVisible(true); } });
+    if(el('idTarifa')) el('idTarifa').addEventListener('change',function(){ if(value('idTarifa')) showCalculation(value('entradaFecha')); });
     if(el('plena')) el('plena').addEventListener('change',function(){
       if(this.checked && el('mensualidad')) el('mensualidad').checked=false;
       if(value('idTarifa')) showCalculation(value('entradaFecha'));
@@ -2919,7 +2933,7 @@ function calcularTarifaServidor(){
       if(value('idTarifa')) showCalculation(value('entradaFecha'));
     });
     if(el('placa')) {
-      el('placa').addEventListener('input',function(){this.value=this.value.toUpperCase(); window.myFunction(); checkMonthlyPlate(); applyPlateDetection();});
+      el('placa').addEventListener('input',function(){this.value=this.value.toUpperCase(); window.myFunction(); applyVehicleFromPlate(); checkMonthlyPlate();});
       el('placa').addEventListener('focus',function(){ showPlateSuggestions(); });
       el('placa').addEventListener('keydown',function(ev){
         if(ev.key==='ArrowDown'){ ev.preventDefault(); showPlateSuggestions(); movePlateSuggestion(1); }

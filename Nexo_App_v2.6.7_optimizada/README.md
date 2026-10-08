@@ -1,6 +1,6 @@
 # Nexo.app (antes FacaParking) — Sistema de parqueadero offline
 
-**Versión actual: 2.6.34** (la fuente de verdad es `"version"` en `package.json`;
+**Versión actual: 2.6.49** (la fuente de verdad es `"version"` en `package.json`;
 `APP_VERSION` en `mvc/app-controller.js` y `package-lock.json` deben coincidir).
 
 Aplicación de escritorio (Electron) para gestionar un parqueadero: entradas y
@@ -38,6 +38,15 @@ npm run dist    # genera el instalador .exe en la carpeta dist/
 > en el `.exe` (y viceversa). Para operar usar siempre el `.exe` (o `npm
 > start`). Si hay datos reales en el navegador, hay que exportarlos/importarlos
 > antes de pasar a producción con el `.exe`.
+
+## Actualizar la app sin perder datos
+
+- Los datos viven en el `localStorage` de Electron, dentro de la carpeta de datos del usuario de Windows (`%APPDATA%`). **Instalar una versión nueva encima de la anterior no los toca**: el instalador NSIS no borra esa carpeta ni al actualizar ni al desinstalar.
+- Para que la versión nueva use la misma información, **no cambiar** en `package.json`: `name`, `build.productName` ni `build.appId` (de ahí sale el nombre de la carpeta de datos). Usar siempre el `.exe` instalado; `npm start` usa otra carpeta y mostraría la app vacía.
+- Los reinicios históricos de `ParkApp.html` (V38: consecutivo de recibos; V85: limpieza de datos operativos) ahora **no hacen nada si ya hay datos guardados**; solo dejan su marca. Antes, si la marca no existía, borraban entradas, ventas, mensualidades, caja y reiniciaban el consecutivo.
+- Reportes arranca en "Hoy" al entrar (`initReports`, mvc/app-controller.js).
+- Mensualidades: botón **Imprimir** en las filas con pago pendiente (junto a "Pagar mensualidad"); imprime un recibo de cobro pendiente (`printMonthlyPendingReceipt`, mvc/app-controller.js) con período, abono/saldo y cargos fuera de horario (sin teléfono, sin días de mora y sin leyenda al pie). No registra pagos ni usa consecutivo.
+- Los campos nuevos se leen con valores por defecto (por ejemplo, los teléfonos de Mensualidades siguen guardados en `document`, separados por coma), así que los registros antiguos se abren igual.
 
 ## Arquitectura
 
@@ -129,13 +138,14 @@ Jerarquía: **Superadmin > Administrador > Empleado**.
 - Registrar una mensualidad **no cobra**: queda "pendiente de pago" y el pago
   se registra desde la lista. Mientras esté vigente (aunque no se haya pagado)
   bloquea la entrada normal de esa placa.
-- Plazo de gracia: **3 días después del vencimiento** para poder registrar
-  el pago (aplica igual a: renovación normal, primer pago de un registro
-  nuevo, y segundo abono de un pago quincenal). Pasado ese plazo la
-  mensualidad se desactiva y hay que editarla o registrarla de nuevo.
-- La desactivación por vencimiento corre en **cada carga de página y en cada
-  redibujado del Dashboard** (no solo al abrir Mensualidades), así que
-  Dashboard, listado y bloqueo de entradas usan la misma regla.
+- **Sin límite de días de mora** (desde 2.6.34): una mensualidad vencida se
+  puede pagar siempre (renovación normal, primer pago de un registro nuevo
+  y segundo abono de un pago quincenal), sin importar cuántos días lleve en
+  mora, y ya no se desactiva sola. Aparece como "En mora (N d)". Cada pago
+  cubre un período que continúa desde la fecha de fin anterior (si lleva
+  varios meses de atraso quedará aún en mora hasta ponerse al día; si el
+  cliente ya no volvió, se elimina el registro). En Entradas la mensualidad
+  sigue dejando de bloquear la placa pasados 3 días del vencimiento.
 - Pago quincenal (2 abonos): funciona tanto al registrar una mensualidad
   nueva como al renovarla. El saldo del segundo abono se calcula sobre lo
   **realmente cobrado** (después de descuento), no sobre el monto nominal
@@ -158,19 +168,18 @@ Jerarquía: **Superadmin > Administrador > Empleado**.
 - "Reporte de mensualidades" con filtros (fechas, forma de pago) e impresión
   de recibo de cada pago (consecutivo propio `FM`).
 - Estados que muestra la tabla: Activo, Renovación permitida, Vence hoy,
-  Gracia 3 días, Vencido, Pendiente de pago, Pendiente de confirmar pago y
+  En mora (N d), Pendiente de pago, Pendiente de confirmar pago y
   Quincenal (abonado / pendiente).
 - Dashboard ("Inicio"): tarjeta "Mensualidades por vencer / en mora" con código de
   colores — rojo (en mora o vence hoy), amarillo (1 a 3 días), verde (4 a 6
-  días). La mora se muestra **sin límite de días**: las que superan los 3 días
-  de gracia (que la app desactiva sola) siguen apareciendo como "Mora (N d)"
-  hasta que se editen con nueva fecha, se renueven o se eliminen (o hasta que
-  la purga de 12 meses las borre). No se listan las pendientes de confirmar
+  días). La mora se muestra **sin límite de días**: las vencidas siguen
+  apareciendo como "Mora (N d)" hasta que se paguen, se editen con nueva
+  fecha o se eliminen (o hasta que la purga de 12 meses las borre). No se listan las pendientes de confirmar
   pago ni las que ya tienen pagado el siguiente período, y un registro vencido
   no cuenta como mora si esa placa ya tiene otra mensualidad activa o por
   confirmar; con varios registros vencidos de una misma placa sale el más
-  reciente. Ojo: pasada la gracia ya no aparece "Pagar mensualidad" (regla de
-  los 3 días); se resuelve con Editar (Administrador) o Eliminar.
+  reciente. "Pagar mensualidad" aparece siempre que la mensualidad esté en
+  mora, sin importar los días.
 - Los diálogos de pago quincenal usan un modal HTML propio (no
   `window.prompt()`, que Electron no soporta de forma confiable).
 
@@ -441,8 +450,8 @@ Jerarquía: **Superadmin > Administrador > Empleado**.
 - **2.6.30**: Mensualidades — el campo "Documento" pasó a "Número telefónico" y se pueden agregar varios números (botón "+ Agregar otro número"). Se guardan en el mismo campo interno `document`, separados por coma, así que los datos existentes se conservan (un documento viejo aparece como un número más). La tabla los muestra uno por línea, la etiqueta por defecto del recibo es "Teléfono" y la importación acepta la columna `telefono` además de `documento`.
 - **2.6.31**: Cierre de Caja — nueva tarjeta informativa "Ingresos" (ingresos manuales de la caja abierta) junto a Egresos, y el resumen de cierre muestra el recuadro "Ingresos manuales". No cambia ningún cálculo: "Ventas" sigue incluyendo los ingresos manuales.
 - **2.6.32**: Ventas — nuevo campo "Buscar por placa o recibo" en los filtros. Filtra mientras se escribe y se combina con las fechas y el tipo de pago; el total de ventas filtradas se recalcula. Acepta el recibo con o sin prefijo (FA105 o 105) e ignora mayúsculas, espacios y guiones.
-- **2.6.33**: Entradas — el servicio se selecciona solo al escribir la placa. Códigos propios: `cicla`/`cicla1`… (o `cical…`) → Cicla; `ptelec`/`ptelec1`… (patineta eléctrica) → tarifa de Cicla; `mtelec`/`mtele1`… (moto eléctrica) → tarifa de Moto. Placas: `ABC123` → Carro; `ABC12D` y `ABC12` → Moto. Si la placa ya entró antes se usa el servicio con que se registró. Bajo el campo aparece "Detectado: …". Si el operador cambia el servicio a mano, deja de sobrescribirse hasta borrar la placa. El campo Placa admite hasta 10 caracteres (antes 6) para los códigos con número.
-- **2.6.34**: Entradas — la detección del servicio por placa quedó automática y reforzada. El selector "Servicio" ya no se muestra cuando la placa se reconoce (aparece "Detectado: … · Cambiar"); solo se ve si la placa no se reconoce (5+ caracteres), al pulsar "Cambiar" o al abrir una entrada para cobrar la salida. Si la placa no se reconoce o se borra, el servicio se limpia (no queda uno viejo). Al elegir una sugerencia de placa que ya salió también se detecta. Los servicios se buscan por nombre (Carro, Moto, Cicla) además de por id, y `registrar()` vuelve a detectar como red de seguridad. Se quitó `required` del selector porque ahora puede estar oculto (registrar() ya lo valida).
+- **2.6.33**: Entradas y Mensualidades — (1) el filtro por fecha de los pagos de mensualidad usa la fecha LOCAL (antes, un pago hecho después de las 7:00 p. m. aparecía al día siguiente); (2) el botón Registrar ya no queda "congelado": solo se atenúa y cada clic se evalúa con la hora actual, y el aviso se refresca solo cada ~10 s; (3) las horas de una mensualidad de noche se leen aunque estén escritas como "7pm" o "7:00 p. m." (la importación CSV las normaliza a HH:MM y rechaza las inválidas); sin horas válidas se avisa el motivo en vez de bloquear sin explicación; la franja es [entrada, salida): a la hora límite de salida en punto ya se puede registrar; (4) si una placa tiene varias mensualidades vigentes se toma la de fecha de fin más reciente (sin repetidos por id), en Entradas y en el registro manual de Reportes; (5) una placa con entrada abierta muestra un aviso claro (recibo y hora de ingreso) y se comprueba antes que la mensualidad.
+- **2.6.34**: Mensualidades — se eliminó el límite de 3 días de mora: (1) se puede registrar el pago de una mensualidad vencida sin importar los días de atraso (renovación, primer pago y segundo abono quincenal); (2) ya no se desactiva sola por vencimiento (`deactivateExpiredMonthlies` quedó como no-op); (3) los estados "Gracia 3 días" y "Vencido — superó el plazo" pasaron a "En mora (N d)"; (4) un pendiente de pago o abono quincenal con la fecha de fin ya pasada cuenta en el filtro "Vencidas". Cada pago continúa el período desde la fecha de fin anterior. En Entradas y en el registro manual de Reportes no cambió: la placa deja de bloquearse 3 días después del vencimiento.
 
 ### Serie v37 → V131
 Historial resumido de los parches aplicados, en orden. Cada punto refleja lo
@@ -510,3 +519,18 @@ histórica.
   `mvc/app-controller.js`. Migración automática de una sola vez en
   `mvc/model.js` que fusiona y borra la clave vieja al abrir cualquier
   pantalla, liberando el espacio ya ocupado en instalaciones existentes.
+- **2.6.35**: Entradas — al elegir en la lista de sugerencias una placa que solo tiene mensualidad (sin entrada abierta), ya no se abre un panel de cobro de una entrada inexistente (antes mostraba un monto y tiempo calculados desde la fecha de la mensualidad y "Finalizar venta"); ahora se prepara una entrada nueva con esa placa y se muestra el aviso de mensualidad. Además, las placas con mensualidad ya no se ordenan como si estuvieran parqueadas y no reemplazan a una entrada real abierta de la misma placa.
+- **2.6.36**: Entradas — la lista de sugerencias de placas ya no incluye mensualidades: solo salen placas con entradas reales (una mensualidad aparece cuando registra una entrada). Regla de 15 días verificada con pruebas: una placa sin actividad (salida registrada) hace más de 15 días no sale; un vehículo todavía parqueado nunca se oculta; vuelve a salir en cuanto se registra de nuevo. Esto reemplaza el ajuste de mensualidades de 2.6.35 en esta lista.
+- **2.6.37**: Cierre de Caja — "Ventas del día" (tarjeta en pantalla) y "Ventas" (resumen de cierre) ya NO suman los ingresos manuales: muestran solo las ventas de parqueadero, igual que el total guardado en el historial de cierres. Los ingresos manuales siguen sumando al Efectivo esperado (efectivo de ventas + ingresos − egresos) y se muestran en su propia tarjeta "Ingresos". Reemplaza lo indicado en 2.6.31 ("Ventas sigue incluyendo los ingresos manuales").
+- **2.6.38**: Cierre de Caja — las tarjetas de la pantalla se reordenaron en tres filas: (1) Base del día, Ventas del día, Pagos electrónicos, Efectivo esperado; (2) Ingresos, Egresos, Descuentos; (3) Movimientos, Recibo inicio, Recibo final. Solo cambia la disposición (caja.html); los cálculos no cambian.
+- **2.6.39**: Cierre de Caja — la lista de ventas resalta cada fila con un color muy suave: rojo claro si tuvo descuento, azul claro si se pagó electrónico (Nequi) y verde claro si se pagó en efectivo. El descuento tiene prioridad sobre la forma de pago; en "Efectivo + Electrónico" solo la celda Efectivo va en verde y la celda Nequi en azul. Solo afecta la lista de Cierre de Caja (Ventas y el resumen de cierre no cambian).
+- **2.6.40**: Reporte de cierre de caja — la tabla "Ventas de parqueadero" del resumen que sale al cerrar caja usa los mismos colores suaves que la lista de Cierre de Caja (rojo claro = descuento, azul claro = electrónico, verde claro = efectivo; en "Efectivo + Electrónico", celda Efectivo verde y celda Nequi azul). Reemplaza el rojo fuerte con texto en negrita que tenían las filas con descuento, e incluye `print-color-adjust` para que los colores también salgan al imprimir. La regla vive en `cashRowKind` (mvc/app-controller.js) y la comparten la lista y el reporte.
+- **2.6.41**: Entradas — al escribir o consultar la placa de un vehículo que ya está adentro (para darle salida) ya no aparece el aviso "La placa X ya está adentro: tiene una entrada abierta… Dele salida primero y luego registre la nueva entrada". El botón Registrar sigue atenuado para esa placa y, si se pulsa, se mantiene la alerta de que ya está adentro. Los avisos de mensualidad (bloqueada o fuera de horario) no cambian.
+- **2.6.42**: Reportes — nueva sección "Fidelidad de clientes" (antes de Cierres de caja). Cada placa es un cliente y se mide con las entradas del período filtrado: clientes (placas únicas), recurrentes (2+ visitas), tasa de retorno y visitas por cliente; distribución por nivel (Nuevo 1 visita, Ocasional 2–3, Frecuente 4–7, Fiel 8+; ajustable en `LOYALTY_LEVELS`, mvc/app-controller.js); y tabla de los 20 clientes con más visitas con total pagado, promedio de días entre visitas y última visita ("hace N días"), marcando las placas con mensualidad. Respeta los botones Hoy/Semana/Mes/Año/Total. No se incluye aún en las exportaciones de Excel/PDF/Imprimir.
+- **2.6.43**: Reportes › Fidelidad de clientes — el nivel ahora sale de un puntaje 0–100 con ponderación: frecuencia 35% (8 visitas = 100%), duración 25% (estadía promedio, 4 h = 100%), regularidad 25% (qué tan parejos son los días entre visitas; requiere 3+ visitas) y recencia 15% (la última visita baja a 0% a los 30 días). Niveles: Nuevo (1 visita), Ocasional (<45), Frecuente (45–69), Fiel (70+). La tabla muestra Puntaje y Estadía prom. y se ordena por puntaje. Pesos y metas ajustables en `LOYALTY_WEIGHTS`, `LOYALTY_TARGET_VISITS`, `LOYALTY_TARGET_HOURS` y `LOYALTY_RECENCY_DAYS` (mvc/app-controller.js).
+- **2.6.44**: Paginadores — todos usan el mismo diseño azul (botones Anterior/Siguiente en azul, gris cuando están deshabilitados). Faltaban los de Cierre de caja (`#cashSalesPager`) y Historial de ingresos de Configuración (`#loginHistoryPager`); ahora comparten la regla con Ventas, Pendientes, Mensualidades y Transacciones.
+- **2.6.45**: Paginadores — todas las listas (Ventas, Cierre de caja, Historial de ingresos, Pendientes, Mensualidades y su historial de pagos, Transacciones) usan ahora el mismo paginador: Anterior · "Página X de Y · N registros" · Siguiente, en azul. Sale de una sola función, `fpPager()` (mvc/app-controller.js), que también inyecta su estilo; ya no hay botones con número de página.
+- **2.6.46**: Ventas — al editar la forma de pago (lápiz) hay una cuarta opción, "Pendiente". Al guardarla la venta sale de Ventas, Reportes y Caja y queda en Pendientes (mismo flujo que el botón "Pendiente" de Entradas: `markEntryPending()` en mvc/app-controller.js); se cobra luego con "Confirmar pago", que exige caja abierta.
+- **2.6.47**: Reportes › Fidelidad de clientes — ya no depende de los botones Hoy/Semana/Mes/Año/Total: siempre se calcula con todas las entradas, desde el día uno hasta hoy. La tabla tiene un selector "Ver" (Todos, Fiel, Frecuente, Ocasional, Nuevo); con un nivel elegido se listan todos los clientes de ese nivel, con "Todos" solo los 20 de mayor puntaje (`LOYALTY_TABLE_LIMIT`).
+- **2.6.48**: Reportes › gráfica de Ingresos y egresos — se resaltan con un marcador y una etiqueta la venta mayor (verde, "Mayor: $X") y la venta menor (naranja, "Menor: $X") del período graficado (hora, día, semana o mes). La menor se toma entre los períodos con ventas (> $0). Se activa con `highlight:true` en la serie de `drawLineChart` (mvc/app-controller.js).
+- **2.6.49**: Reportes › Fidelidad de clientes — con "Todos" la tabla muestra los 40 clientes con mayor puntaje (antes 20), paginados de a 10 con el paginador único (`#loyaltyPager`, `LOYALTY_TABLE_LIMIT`/`LOYALTY_PAGE_SIZE` en mvc/app-controller.js). Con un nivel elegido se siguen listando todos los clientes de ese nivel, también de a 10 por página. Al cambiar el selector "Ver" vuelve a la página 1.
